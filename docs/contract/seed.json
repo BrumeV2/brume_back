@@ -1,0 +1,248 @@
+{
+  "$comment": "Jeu de données de référence MVP (T-003). Fixtures du front et seed de dev du back. Montants en centimes TTC. Mots de passe en clair : DEV UNIQUEMENT, hachés (bcrypt) au chargement.",
+  "version": "0.1.0",
+  "users": [
+    {
+      "id": "e0000000-0000-4000-8000-000000000001",
+      "email": "camille.martin@example.com",
+      "password": "BrumeClient2026!",
+      "firstName": "Camille",
+      "lastName": "Martin",
+      "phone": "0612345678",
+      "role": "CUSTOMER"
+    },
+    {
+      "id": "e0000000-0000-4000-8000-000000000002",
+      "email": "admin@brume.dev",
+      "password": "BrumeAdmin2026!",
+      "firstName": "Admin",
+      "lastName": "Brume",
+      "phone": null,
+      "role": "ADMIN"
+    }
+  ],
+  "addresses": [
+    {
+      "id": "e1000000-0000-4000-8000-000000000001",
+      "userId": "e0000000-0000-4000-8000-000000000001",
+      "label": "Maison",
+      "firstName": "Camille",
+      "lastName": "Martin",
+      "line1": "12 rue des Lilas",
+      "line2": null,
+      "postalCode": "69003",
+      "city": "Lyon",
+      "country": "FR",
+      "phone": "0612345678",
+      "isDefault": true
+    }
+  ],
+  "categories": [
+    { "id": "c0000000-0000-4000-8000-000000000001", "name": "Thés", "slug": "thes", "description": "Thés noirs, verts, blancs et infusions.", "parentId": null, "position": 1 },
+    { "id": "c0000000-0000-4000-8000-000000000002", "name": "Cafés", "slug": "cafes", "description": "Cafés de spécialité, en grains ou moulus.", "parentId": null, "position": 2 },
+    { "id": "c0000000-0000-4000-8000-000000000003", "name": "CBD", "slug": "cbd", "description": "Produits au CBD, THC ≤ 0,3 %. Réservés aux personnes majeures.", "parentId": null, "position": 3 },
+    { "id": "c0000000-0000-4000-8000-000000000004", "name": "Box & coffrets", "slug": "box-coffrets", "description": "TEA-BOX et coffrets.", "parentId": null, "position": 4 },
+    { "id": "c0000000-0000-4000-8000-000000000005", "name": "Accessoires", "slug": "accessoires", "description": "Théières, tasses et infuseurs.", "parentId": null, "position": 5 }
+  ],
+  "ingredients": [
+    { "id": "a1000000-0000-4000-8000-000000000001", "name": "Thé noir", "slug": "the-noir" },
+    { "id": "a1000000-0000-4000-8000-000000000002", "name": "Bergamote", "slug": "bergamote" },
+    { "id": "a1000000-0000-4000-8000-000000000003", "name": "Thé vert", "slug": "the-vert" },
+    { "id": "a1000000-0000-4000-8000-000000000004", "name": "Arabica", "slug": "arabica" },
+    { "id": "a1000000-0000-4000-8000-000000000005", "name": "Chanvre", "slug": "chanvre" }
+  ],
+  "products": [
+    {
+      "id": "a0000000-0000-4000-8000-000000000001",
+      "slug": "earl-grey-imperial",
+      "name": "Earl Grey Impérial",
+      "type": "TEA",
+      "categoryId": "c0000000-0000-4000-8000-000000000001",
+      "shortDescription": "Thé noir à la bergamote de Calabre.",
+      "description": "Un grand classique : thé noir de Darjeeling et huile essentielle de bergamote de Calabre.",
+      "vatRateBps": 550,
+      "ageRestricted": false,
+      "origin": "Inde, Darjeeling",
+      "attributes": { "caffeine": "high", "steepTimeMinutes": 4, "waterTempCelsius": 95 },
+      "images": [{ "url": "https://cdn.brume.dev/products/earl-grey-imperial-1.jpg", "alt": "Earl Grey Impérial en vrac" }],
+      "ingredientSlugs": ["the-noir", "bergamote"],
+      "archived": false,
+      "variants": [
+        { "id": "b0000000-0000-4000-8000-000000000011", "sku": "EG-50G", "label": "50 g", "priceCents": 790, "weightGrams": 50, "stockQuantity": 12, "position": 1, "archived": false },
+        { "id": "b0000000-0000-4000-8000-000000000012", "sku": "EG-100G", "label": "100 g", "priceCents": 1290, "weightGrams": 100, "stockQuantity": 30, "position": 2, "archived": false },
+        { "id": "b0000000-0000-4000-8000-000000000013", "sku": "EG-250G", "label": "250 g", "priceCents": 2790, "weightGrams": 250, "stockQuantity": 3, "position": 3, "archived": false }
+      ]
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000002",
+      "slug": "sencha-bio",
+      "name": "Sencha Bio",
+      "type": "TEA",
+      "categoryId": "c0000000-0000-4000-8000-000000000001",
+      "shortDescription": "Thé vert japonais, notes végétales et iodées.",
+      "description": null,
+      "vatRateBps": 550,
+      "ageRestricted": false,
+      "origin": "Japon, Shizuoka",
+      "attributes": { "caffeine": "medium", "steepTimeMinutes": 2, "waterTempCelsius": 75, "organic": true },
+      "images": [],
+      "ingredientSlugs": ["the-vert"],
+      "archived": false,
+      "variants": [
+        { "id": "b0000000-0000-4000-8000-000000000021", "sku": "SEN-100G", "label": "100 g", "priceCents": 1490, "weightGrams": 100, "stockQuantity": 0, "position": 1, "archived": false }
+      ]
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000003",
+      "slug": "ethiopie-moka-sidamo",
+      "name": "Éthiopie Moka Sidamo",
+      "type": "COFFEE",
+      "categoryId": "c0000000-0000-4000-8000-000000000002",
+      "shortDescription": "Arabica floral, notes de jasmin et d'agrumes.",
+      "description": null,
+      "vatRateBps": 550,
+      "ageRestricted": false,
+      "origin": "Éthiopie, Sidamo",
+      "attributes": { "intensity": 3, "roast": "light" },
+      "images": [],
+      "ingredientSlugs": ["arabica"],
+      "archived": false,
+      "variants": [
+        { "id": "b0000000-0000-4000-8000-000000000031", "sku": "ETH-G-250", "label": "Grains 250 g", "priceCents": 990, "weightGrams": 250, "stockQuantity": 25, "position": 1, "archived": false },
+        { "id": "b0000000-0000-4000-8000-000000000032", "sku": "ETH-M-250", "label": "Moulu 250 g", "priceCents": 990, "weightGrams": 250, "stockQuantity": 18, "position": 2, "archived": false }
+      ]
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000004",
+      "slug": "fleurs-cbd-amnesia",
+      "name": "Fleurs CBD Amnesia",
+      "type": "CBD",
+      "categoryId": "c0000000-0000-4000-8000-000000000003",
+      "shortDescription": "Fleurs de chanvre, 12 % CBD, THC < 0,3 %.",
+      "description": "Produit réservé aux personnes majeures. Ne pas consommer en cas de grossesse.",
+      "vatRateBps": 2000,
+      "ageRestricted": true,
+      "origin": "France",
+      "attributes": { "cbdPercent": 12, "thcPercentMax": 0.3 },
+      "images": [{ "url": "https://cdn.brume.dev/products/fleurs-cbd-amnesia-1.jpg", "alt": "Fleurs CBD Amnesia" }],
+      "ingredientSlugs": ["chanvre"],
+      "archived": false,
+      "variants": [
+        { "id": "b0000000-0000-4000-8000-000000000041", "sku": "CBD-AMN-3G", "label": "3 g", "priceCents": 1490, "weightGrams": 3, "stockQuantity": 40, "position": 1, "archived": false },
+        { "id": "b0000000-0000-4000-8000-000000000042", "sku": "CBD-AMN-10G", "label": "10 g", "priceCents": 3990, "weightGrams": 10, "stockQuantity": 8, "position": 2, "archived": false }
+      ]
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000005",
+      "slug": "tea-box-decouverte-automne",
+      "name": "TEA-BOX Découverte — Automne",
+      "type": "BOX",
+      "categoryId": "c0000000-0000-4000-8000-000000000004",
+      "shortDescription": "Trois références choisies par l'équipe pour l'automne.",
+      "description": null,
+      "vatRateBps": 550,
+      "ageRestricted": false,
+      "origin": null,
+      "attributes": {},
+      "images": [],
+      "ingredientSlugs": [],
+      "archived": false,
+      "variants": [
+        { "id": "b0000000-0000-4000-8000-000000000051", "sku": "BOX-DEC-AUT26", "label": "Box", "priceCents": 2990, "weightGrams": 450, "stockQuantity": 15, "position": 1, "archived": false }
+      ],
+      "components": [
+        { "parentVariantId": "b0000000-0000-4000-8000-000000000051", "componentVariantId": "b0000000-0000-4000-8000-000000000011", "quantity": 1, "position": 1 },
+        { "parentVariantId": "b0000000-0000-4000-8000-000000000051", "componentVariantId": "b0000000-0000-4000-8000-000000000021", "quantity": 1, "position": 2 },
+        { "parentVariantId": "b0000000-0000-4000-8000-000000000051", "componentVariantId": "b0000000-0000-4000-8000-000000000031", "quantity": 1, "position": 3 }
+      ]
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000006",
+      "slug": "theiere-fonte-kyoto",
+      "name": "Théière en fonte Kyoto",
+      "type": "ACCESSORY",
+      "categoryId": "c0000000-0000-4000-8000-000000000005",
+      "shortDescription": "Théière en fonte émaillée, 0,8 L, filtre inox.",
+      "description": null,
+      "vatRateBps": 2000,
+      "ageRestricted": false,
+      "origin": null,
+      "attributes": { "capacityMl": 800 },
+      "images": [],
+      "ingredientSlugs": [],
+      "archived": false,
+      "variants": [
+        { "id": "b0000000-0000-4000-8000-000000000061", "sku": "POT-KYOTO-08", "label": "0,8 L", "priceCents": 3490, "weightGrams": 1200, "stockQuantity": 5, "position": 1, "archived": false }
+      ]
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000007",
+      "slug": "darjeeling-printemps-2025",
+      "name": "Darjeeling First Flush 2025",
+      "type": "TEA",
+      "categoryId": "c0000000-0000-4000-8000-000000000001",
+      "shortDescription": "Récolte 2025, retiré de la vente (exemple de produit archivé).",
+      "description": null,
+      "vatRateBps": 550,
+      "ageRestricted": false,
+      "origin": "Inde, Darjeeling",
+      "attributes": {},
+      "images": [],
+      "ingredientSlugs": ["the-noir"],
+      "archived": true,
+      "variants": [
+        { "id": "b0000000-0000-4000-8000-000000000071", "sku": "DJ-FF25-100G", "label": "100 g", "priceCents": 1890, "weightGrams": 100, "stockQuantity": 0, "position": 1, "archived": true }
+      ]
+    }
+  ],
+  "shippingMethods": [
+    { "id": "f0000000-0000-4000-8000-000000000001", "code": "RELAY", "name": "Point relais", "carrier": "Mondial Relay", "priceCents": 390, "freeFromCents": 4900, "estimatedDaysMin": 3, "estimatedDaysMax": 5, "active": true },
+    { "id": "f0000000-0000-4000-8000-000000000002", "code": "HOME", "name": "Livraison à domicile", "carrier": "Colissimo", "priceCents": 590, "freeFromCents": 4900, "estimatedDaysMin": 2, "estimatedDaysMax": 3, "active": true }
+  ],
+  "carts": [
+    {
+      "$comment": "Panier de Camille : reproduit la commande témoin (DECISIONS.md) → quote HOME = 4660",
+      "id": "90000000-0000-4000-8000-000000000000",
+      "userId": "e0000000-0000-4000-8000-000000000001",
+      "items": [
+        { "id": "90000000-0000-4000-8000-000000000001", "variantId": "b0000000-0000-4000-8000-000000000012", "quantity": 2 },
+        { "id": "90000000-0000-4000-8000-000000000002", "variantId": "b0000000-0000-4000-8000-000000000041", "quantity": 1 }
+      ]
+    }
+  ],
+  "orders": [
+    {
+      "$comment": "Commande témoin payée. Ses lignes sont gelées : modifier le catalogue ne doit rien y changer.",
+      "id": "d0000000-0000-4000-8000-000000000001",
+      "number": "BR-2026-000001",
+      "userId": "e0000000-0000-4000-8000-000000000001",
+      "status": "PAID",
+      "currency": "EUR",
+      "itemsTotalCents": 4070,
+      "discountCents": 0,
+      "shippingCents": 590,
+      "totalCents": 4660,
+      "vatBreakdown": [
+        { "rateBps": 550, "baseCents": 2816, "vatCents": 155, "totalCents": 2971 },
+        { "rateBps": 2000, "baseCents": 1407, "vatCents": 282, "totalCents": 1689 }
+      ],
+      "shippingAddress": { "firstName": "Camille", "lastName": "Martin", "line1": "12 rue des Lilas", "line2": null, "postalCode": "69003", "city": "Lyon", "country": "FR", "phone": "0612345678" },
+      "shippingMethodCode": "HOME",
+      "shippingMethodName": "Livraison à domicile",
+      "ageDeclaredAt": "2026-10-09T14:29:50.000Z",
+      "reservationExpiresAt": "2026-10-09T15:00:00.000Z",
+      "paidAt": "2026-10-09T14:32:10.000Z",
+      "cancelledAt": null,
+      "cancellationReason": null,
+      "refundedCents": 0,
+      "createdAt": "2026-10-09T14:30:00.000Z",
+      "items": [
+        { "id": "d1000000-0000-4000-8000-000000000001", "variantId": "b0000000-0000-4000-8000-000000000012", "sku": "EG-100G", "productName": "Earl Grey Impérial", "variantLabel": "100 g", "productType": "TEA", "unitPriceCents": 1290, "vatRateBps": 550, "quantity": 2, "lineTotalCents": 2580, "ageRestricted": false, "components": null, "imageUrl": "https://cdn.brume.dev/products/earl-grey-imperial-1.jpg" },
+        { "id": "d1000000-0000-4000-8000-000000000002", "variantId": "b0000000-0000-4000-8000-000000000041", "sku": "CBD-AMN-3G", "productName": "Fleurs CBD Amnesia", "variantLabel": "3 g", "productType": "CBD", "unitPriceCents": 1490, "vatRateBps": 2000, "quantity": 1, "lineTotalCents": 1490, "ageRestricted": true, "components": null, "imageUrl": "https://cdn.brume.dev/products/fleurs-cbd-amnesia-1.jpg" }
+      ],
+      "payments": [
+        { "id": "f1000000-0000-4000-8000-000000000001", "provider": "STRIPE", "providerSessionId": "cs_test_seed_000001", "providerPaymentIntentId": "pi_test_seed_000001", "status": "SUCCEEDED", "amountCents": 4660, "currency": "EUR", "failureCode": null, "failureMessage": null, "succeededAt": "2026-10-09T14:32:10.000Z", "createdAt": "2026-10-09T14:30:00.000Z" }
+      ]
+    }
+  ]
+}
