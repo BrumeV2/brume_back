@@ -1,0 +1,50 @@
+services:
+  api:
+    build:
+      context: .
+      target: dev
+    container_name: brume-api
+    env_file: .env
+    environment:
+      DB_HOST: postgres          # dans Docker, on joint la base par son nom de service
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app                   # ton code est monté : hot reload
+      - /app/node_modules        # mais on garde le node_modules du conteneur
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: brume-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      - brume_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: brume-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@brume.dev
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+
+volumes:
+  brume_pgdata:
