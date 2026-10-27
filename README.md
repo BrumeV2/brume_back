@@ -92,6 +92,8 @@ Une fois la stack lancée :
 
 Le modèle se trouve dans [`.env.example`](.env.example). Le fichier `.env` n'est **jamais** commité.
 
+Pour Google SSO, renseigner `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` et `AUTH_SUCCESS_URL`. Voir [la configuration et le parcours complet](docs/AUTH.md).
+
 | Variable | Défaut | Description |
 |---|---|---|
 | `PORT` | `3000` | Port d'écoute de l'API |
@@ -100,7 +102,7 @@ Le modèle se trouve dans [`.env.example`](.env.example). Le fichier `.env` n'es
 | `DB_USER` | `brume` | Utilisateur PostgreSQL |
 | `DB_PASSWORD` | `change-me` | Mot de passe PostgreSQL |
 | `DB_NAME` | `brume` | Nom de la base |
-| `CORS_ORIGIN` | *(vide)* | Origines autorisées, séparées par des virgules. Vide = toutes (dev) |
+| `CORS_ORIGIN` | `http://localhost:5173` | Origines explicites autorisées, séparées par des virgules, sans slash final |
 
 ---
 
@@ -135,7 +137,7 @@ docker compose exec api npm run migration:show     # voir l'état
 docker compose exec api npx nest g resource modules/<nom> --no-spec   # nouveau module
 docker compose exec api npm run lint                                  # lint
 docker compose exec api npm run test                                  # tests unitaires
-docker compose exec api npm run test:e2e                              # tests e2e
+docker compose exec api npm run test:e2e                              # tests e2e : base TEST_DB_NAME dédiée requise (docs/AUTH.md)
 ```
 
 ---
@@ -189,7 +191,8 @@ src/
 - [ ] Checkout : adresse, mode de livraison, récapitulatif
 - [ ] Commande et confirmation
 - [ ] Paiement en ligne : succès, échec, webhooks
-- [ ] Inscription et connexion (bcrypt + JWT), profil, historique de commandes
+- [x] Inscription et connexion Google SSO, sessions révocables, lecture du profil (`docs/AUTH.md`)
+- [ ] Modification du profil, historique de commandes
 - [ ] Back-office : produits, commandes, stock
 
 ### Ensuite

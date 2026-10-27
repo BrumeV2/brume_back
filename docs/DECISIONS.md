@@ -26,7 +26,7 @@
 | D-016 | Variantes produit | Produit + variantes (SKU), chacune avec son prix et son stock | 🟢 | PO + tech lead | US-001, 002, 004, 021, 080 |
 | D-017 | Panier visiteur | Panier en localStorage côté front, fusionné au panier du compte à la connexion | 🟢 | Tech lead + front | US-021 à 024, 046 |
 | D-018 | Contrat d'API | OpenAPI écrit d'abord (`docs/contract/openapi.yaml`), le code doit s'y conformer | 🟢 | Tech lead | toutes |
-| D-019 | Jetons d'auth | JWT d'accès 15 min (header Bearer) + refresh token en cookie httpOnly | 🟡 | Tech lead | US-045, 046 |
+| D-019 | Authentification | Google SSO uniquement et sessions opaques révocables en cookie HttpOnly | 🟢 | Équipe API | US-045, US-046, ADD-087 |
 
 ---
 
@@ -152,7 +152,7 @@ PENDING_PAYMENT ──paiement réussi──▶ PAID ──admin──▶ PREPAR
 | Déclaration d'âge CBD | rattachée au compte | à refaire à chaque commande |
 | Effort MVP | auth déjà prévue (US-045, 046) | modèle et parcours en plus |
 
-- Pour limiter l'impact sur la conversion : inscription **dans le tunnel**, en quelques champs seulement (email, mot de passe, nom).
+- Pour limiter l'impact sur la conversion : connexion Google **dans le tunnel** ; aucun mot de passe client.
 - L'achat invité reste une option pour la V1, décision 🔴.
 
 ## D-014 — Codes promo 🟡 ⚖️
@@ -188,10 +188,16 @@ PENDING_PAYMENT ──paiement réussi──▶ PAID ──admin──▶ PREPAR
 - Le front développe contre un **mock** généré depuis ce fichier (Prism) et le jeu de données `docs/contract/seed.json`.
 - Toute évolution de l'API commence par une MR qui modifie le contrat. Le Swagger généré par le code (`/api/docs-json`) doit rester conforme.
 
-## D-019 — Jetons d'authentification 🟡
+## D-019 — Authentification Google et sessions 🟢
 
-- **Access token** JWT, durée 15 min, envoyé dans le header `Authorization: Bearer`.
-- **Refresh token** opaque, durée 30 jours, en cookie `httpOnly; Secure; SameSite=Strict`, stocké haché en base, renouvelé à chaque utilisation (rotation). `POST /auth/refresh`, `POST /auth/logout`.
+Périmètre confirmé le 27 octobre 2026 : Google SSO uniquement pour US-045, US-046 et ADD-087.
+
+- Authorization Code avec state lié au navigateur, nonce et PKCE S256. Vérification côté serveur avec la bibliothèque officielle Google.
+- Identité stable : `google_sub` unique. E-mail vérifié exigé ; aucun rapprochement automatique sur l'e-mail seul.
+- Aucun mot de passe client, JWT d'accès applicatif ni refresh token. Cette décision remplace la proposition précédente.
+- Sessions opaques indépendantes par appareil, empreinte SHA-256 en base, cookie HttpOnly, Secure hors localhost, SameSite=Lax. Expiration absolue configurable (24 h par défaut).
+- Vérification en base à chaque requête privée : expiration, révocation et état du compte. Logout du seul appareil courant.
+- CORS explicite et protection CSRF des mutations. Voir [`AUTH.md`](AUTH.md).
 
 ---
 
@@ -249,3 +255,6 @@ Contrôle : 42,23 + 4,37 = 46,60 € ✔
 |---|---|---|---|
 | 2026-10-09 | 0.1 | Création : propositions D-001 à D-015, commande témoin, décisions ouvertes | Équipe back |
 | 2026-10-09 | 0.2 | T-003 : D-015 tranché (Stripe Checkout), ajout D-016 (variantes), D-017 (panier visiteur), D-018 (contrat OpenAPI), D-019 (jetons) | Équipe back |
+
+
+Modification du 27 octobre 2026 : D-019 validée selon le périmètre utilisateur Google SSO et sessions révocables (US-045, US-046, ADD-087).
