@@ -18,12 +18,48 @@ Les anciennes routes proposées `/auth/register`, `/auth/login`, `/auth/refresh`
 ## Configuration Google et lancement local
 
 1. Copier `.env.example` en `.env`.
-2. Dans Google Cloud, configurer l'écran de consentement et un client OAuth de type **Application Web**. En mode test, autoriser les comptes de test nécessaires.
-3. Déclarer exactement `http://localhost:3000/api/auth/google/callback` comme URI de redirection autorisée pour le développement.
-4. Renseigner `GOOGLE_CLIENT_ID` et `GOOGLE_CLIENT_SECRET` dans `.env`, uniquement côté API. Ne pas transmettre le secret au frontend ou au dépôt.
-5. Adapter `CORS_ORIGIN` et `AUTH_SUCCESS_URL` au frontend. Les origines sont explicites, sans slash final ; l'URL de succès doit appartenir à une origine autorisée.
-6. Lancer `docker compose up -d --build`, puis `docker compose exec api npm run migration:run`.
-7. Ouvrir `http://localhost:3000/api/auth/google` dans le navigateur.
+2. Ouvrir [Google Cloud — Clients OAuth](https://console.cloud.google.com/auth/clients), puis sélectionner ou créer le projet **Brume**.
+3. Si la plateforme demande de configurer l'application :
+   - Dans **Informations sur l'application**, saisir le nom `Brume` et l'e-mail d'assistance.
+   - Dans **Cible**, choisir **Externe** pour permettre la connexion avec des comptes Google personnels, puis cliquer sur **Suivant**. Le choix **Interne** est réservé aux utilisateurs de l'organisation Google Workspace concernée.
+   - Dans **Coordonnées**, renseigner l'e-mail de contact, puis terminer la configuration.
+   - Dans **Audience**, conserver le mode test pour le développement et ajouter les comptes de test nécessaires si leur autorisation est demandée.
+4. Dans **Clients → Créer un client**, choisir **Application Web** et le nom `Brume local`.
+5. Dans **URI de redirection autorisés**, déclarer exactement :
+
+   ```text
+   http://localhost:3000/api/auth/google/callback
+   ```
+
+6. Créer le client et copier son **ID client** ainsi que son **secret client** dans `.env`, uniquement côté API :
+
+   ```dotenv
+   GOOGLE_CLIENT_ID=IDENTIFIANT_FOURNI_PAR_GOOGLE.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=SECRET_FOURNI_PAR_GOOGLE
+   GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/google/callback
+   ```
+
+   Ces valeurs sont des exemples à remplacer. `GOOGLE_CLIENT_ID` correspond à l'ID du client OAuth : ne pas utiliser une adresse Gmail, le nom du projet ou son ID. Ne pas transmettre le secret au frontend ou au dépôt.
+
+7. Adapter `CORS_ORIGIN` et `AUTH_SUCCESS_URL` au frontend. Les origines sont explicites, sans slash final ; l'URL de succès doit appartenir à une origine autorisée.
+8. Au premier lancement, exécuter `docker compose up -d --build`, puis `docker compose exec api npm run migration:run`. Après une modification de `.env`, recharger les variables du conteneur :
+
+   ```bash
+   docker compose up -d --force-recreate api
+   ```
+
+9. Ouvrir `http://localhost:3000/api/auth/google` dans le navigateur pour commencer une nouvelle connexion. Après le retour Google, vérifier le profil sur `http://localhost:3000/api/users/me`. Si le frontend n'est pas démarré sur le port 5173, la redirection finale peut échouer alors que la session API a bien été créée ; ouvrir directement `/api/users/me` pour le vérifier.
+
+Référence : [création des identifiants OAuth pour une application serveur — Google](https://developers.google.com/identity/protocols/oauth2/web-server#creatingcred).
+
+### Résoudre les erreurs de configuration
+
+| Erreur | Vérification |
+|---|---|
+| `503 AUTH_UNAVAILABLE` dès `/auth/google` | Vérifier que `GOOGLE_CLIENT_ID` et `GOOGLE_CLIENT_SECRET` sont renseignés et que le conteneur a été recréé après modification de `.env`. |
+| Google `401 invalid_client` ou « Client missing a project id » | Recopier l'ID du client OAuth Application Web depuis Google Cloud, avec son secret associé. Une adresse Gmail n'est pas un ID client. |
+| Google `redirect_uri_mismatch` | Faire correspondre exactement l'URI autorisée dans Google Cloud et `GOOGLE_REDIRECT_URI` : protocole, hôte, port, chemin et slash final. |
+| Compte refusé en mode test | Vérifier la configuration **Audience** et les comptes de test autorisés. |
 
 Sans identifiants Google, l'API peut démarrer en développement ; l'entrée Google répond 503. Le mode production refuse de démarrer sans configuration Google, URL HTTPS et cookies Secure.
 
