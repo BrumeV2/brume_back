@@ -1,0 +1,1777 @@
+openapi: 3.0.3
+info:
+  title: Brume API
+  version: 0.1.0
+  description: |
+    Contrat d'API du MVP Brume (thé, café, CBD) — T-003.
+
+    **Source de vérité partagée entre `brume-api` et `brume-front` (D-018).**
+    Règles transverses (erreurs, accès, états) : `docs/API.md`. Modèle : `docs/DATA-MODEL.md`.
+
+    - Montants : **entiers en centimes** (suffixe `Cents`), EUR, TTC. Le front ne recalcule jamais un total.
+    - Taux : entiers en points de base (suffixe `Bps`) : 550 = 5,5 %.
+    - Erreurs : toujours le schéma `Error`, le front s'appuie sur `code`.
+servers:
+  - url: http://localhost:3000/api
+    description: API locale (Docker)
+  - url: http://localhost:4010
+    description: Mock Prism (sert les routes sans le préfixe /api)
+tags:
+  - name: health
+  - name: auth
+  - name: users
+  - name: catalog
+  - name: cart
+  - name: checkout
+  - name: orders
+  - name: payments
+  - name: admin-catalog
+  - name: admin-orders
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Healthcheck
+      security: []
+      responses:
+        '200':
+          description: API opérationnelle
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, example: ok }
+
+  # ───────────────────────────── AUTH ─────────────────────────────
+  /auth/register:
+    post:
+      tags: [auth]
+      operationId: register
+      summary: Créer un compte (US-045)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Compte créé, utilisateur connecté. Pose le cookie `refresh_token`.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetRefreshCookie' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409':
+          description: '`EMAIL_ALREADY_USED`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                statusCode: 409
+                code: EMAIL_ALREADY_USED
+                message: Un compte existe déjà avec cet email.
+                path: /api/auth/register
+                timestamp: '2026-10-09T14:30:00.000Z'
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Se connecter (US-046)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Connecté. Pose le cookie `refresh_token`.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetRefreshCookie' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401':
+          description: '`INVALID_CREDENTIALS`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                statusCode: 401
+                code: INVALID_CREDENTIALS
+                message: Email ou mot de passe incorrect.
+                path: /api/auth/login
+                timestamp: '2026-10-09T14:30:00.000Z'
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refresh
+      summary: Renouveler l'access token (rotation du refresh token)
+      security:
+        - refreshCookie: []
+      responses:
+        '200':
+          description: Nouveau jeton. Le cookie est remplacé.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetRefreshCookie' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Se déconnecter (révoque le refresh token)
+      security:
+        - refreshCookie: []
+      responses:
+        '204': { description: 'Déconnecté, cookie effacé' }
+
+  # ───────────────────────────── USERS ─────────────────────────────
+  /users/me:
+    get:
+      tags: [users]
+      operationId: getMe
+      summary: Mon profil (US-047)
+      responses:
+        '200':
+          description: Profil
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    patch:
+      tags: [users]
+      operationId: updateMe
+      summary: Modifier mon profil (US-047)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateProfileRequest' }
+      responses:
+        '200':
+          description: Profil mis à jour
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /users/me/addresses:
+    get:
+      tags: [users]
+      operationId: listMyAddresses
+      summary: Mes adresses (US-048, P1)
+      responses:
+        '200':
+          description: Liste
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Address' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    post:
+      tags: [users]
+      operationId: createMyAddress
+      summary: Ajouter une adresse (US-048, P1)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddressInput' }
+      responses:
+        '201':
+          description: Créée
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Address' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '422': { $ref: '#/components/responses/ShippingZoneNotServed' }
+
+  /users/me/addresses/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [users]
+      operationId: updateMyAddress
+      summary: Modifier une adresse (US-048, P1)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddressInput' }
+      responses:
+        '200':
+          description: Modifiée
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Address' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ShippingZoneNotServed' }
+    delete:
+      tags: [users]
+      operationId: deleteMyAddress
+      summary: Supprimer une adresse (US-048, P1)
+      responses:
+        '204': { description: Supprimée }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────── CATALOG ─────────────────────────────
+  /categories:
+    get:
+      tags: [catalog]
+      operationId: listCategories
+      summary: Catégories (US-003)
+      security: []
+      responses:
+        '200':
+          description: Toutes les catégories, triées par `position`
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Category' }
+
+  /products:
+    get:
+      tags: [catalog]
+      operationId: listProducts
+      summary: Catalogue, recherche, filtres et tri (US-001, 014, 016, 017)
+      description: Les produits archivés sont exclus.
+      security: []
+      parameters:
+        - name: q
+          in: query
+          description: Recherche plein texte sur le nom (US-014)
+          schema: { type: string, maxLength: 100 }
+        - name: category
+          in: query
+          description: Slug de catégorie (inclut les sous-catégories)
+          schema: { type: string }
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/ProductType' }
+        - name: minPriceCents
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: maxPriceCents
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: inStock
+          in: query
+          description: '`true` = uniquement les produits dont au moins une variante est disponible'
+          schema: { type: boolean }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [relevance, price_asc, price_desc, newest, name_asc]
+            default: relevance
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Page de produits
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductSummaryPage' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+
+  /products/{slug}:
+    get:
+      tags: [catalog]
+      operationId: getProduct
+      summary: Fiche produit et disponibilité (US-002, US-004)
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+          example: earl-grey-imperial
+      responses:
+        '200':
+          description: Fiche
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────── CART ─────────────────────────────
+  /cart:
+    get:
+      tags: [cart]
+      operationId: getCart
+      summary: Mon panier et son total (US-024)
+      description: Les prix et la disponibilité sont **recalculés à chaque lecture**.
+      responses:
+        '200':
+          description: Panier (créé vide s'il n'existe pas)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    delete:
+      tags: [cart]
+      operationId: clearCart
+      summary: Vider le panier
+      responses:
+        '204': { description: Panier vidé }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /cart/items:
+    post:
+      tags: [cart]
+      operationId: addCartItem
+      summary: Ajouter au panier (US-021)
+      description: Si la variante est déjà dans le panier, sa quantité est **additionnée**. Le stock est vérifié.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddCartItemRequest' }
+      responses:
+        '200':
+          description: Panier mis à jour
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StockConflict' }
+
+  /cart/items/{itemId}:
+    parameters:
+      - name: itemId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [cart]
+      operationId: updateCartItem
+      summary: Modifier une quantité (US-022)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateCartItemRequest' }
+      responses:
+        '200':
+          description: Panier mis à jour
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StockConflict' }
+    delete:
+      tags: [cart]
+      operationId: removeCartItem
+      summary: Retirer un produit (US-023)
+      responses:
+        '200':
+          description: Panier mis à jour
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /cart/merge:
+    post:
+      tags: [cart]
+      operationId: mergeCart
+      summary: Fusionner le panier visiteur à la connexion (D-017)
+      description: |
+        Quantités additionnées puis **plafonnées au stock disponible** (pas d'erreur 409).
+        Les variantes archivées ou inconnues sont ignorées et signalées dans `warnings`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MergeCartRequest' }
+      responses:
+        '200':
+          description: Panier fusionné
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  # ───────────────────────────── CHECKOUT ─────────────────────────────
+  /shipping-methods:
+    get:
+      tags: [checkout]
+      operationId: listShippingMethods
+      summary: Modes de livraison actifs (US-027, US-052)
+      security: []
+      responses:
+        '200':
+          description: Liste
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ShippingMethod' }
+
+  /checkout/quote:
+    post:
+      tags: [checkout]
+      operationId: quoteCheckout
+      summary: Récapitulatif avant paiement (US-025 à US-028)
+      description: |
+        Valide le panier, l'adresse et le mode de livraison et calcule tous les montants.
+        **Aucun effet de bord** : rien n'est réservé ni créé. Une adresse incomplète est acceptée
+        (pour afficher les montants avant saisie) : seul le code postal est vérifié s'il est présent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuoteRequest' }
+      responses:
+        '200':
+          description: Récapitulatif
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quote' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409': { $ref: '#/components/responses/StockConflict' }
+        '422': { $ref: '#/components/responses/CheckoutUnprocessable' }
+
+  # ───────────────────────────── ORDERS ─────────────────────────────
+  /orders:
+    post:
+      tags: [orders]
+      operationId: createOrder
+      summary: Passer commande et obtenir l'URL de paiement (US-029, US-033)
+      description: |
+        Dans une transaction : vérifie le stock, **gèle** prix et composition, réserve le stock
+        pendant 30 min (D-011), crée la commande `PENDING_PAYMENT` et une session Stripe Checkout.
+        Le panier n'est vidé qu'au paiement réussi.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUID généré par le front pour cette tentative de commande (évite les doublons en cas de double clic ou de nouvel essai réseau)
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOrderRequest' }
+      responses:
+        '201':
+          description: Commande créée, rediriger le client vers `payment.checkoutUrl`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateOrderResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409':
+          description: '`OUT_OF_STOCK`, `PRODUCT_UNAVAILABLE`, `PRICE_CHANGED` ou `IDEMPOTENCY_KEY_REUSED`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                priceChanged:
+                  value:
+                    statusCode: 409
+                    code: PRICE_CHANGED
+                    message: Le total de votre commande a changé, merci de vérifier le récapitulatif.
+                    details: { expectedTotalCents: 4660, actualTotalCents: 4860 }
+                    path: /api/orders
+                    timestamp: '2026-10-09T14:30:00.000Z'
+                outOfStock:
+                  value:
+                    statusCode: 409
+                    code: OUT_OF_STOCK
+                    message: Stock insuffisant pour 1 article.
+                    details:
+                      - { variantId: b0000000-0000-4000-8000-000000000012, sku: EG-100G, requested: 2, available: 1 }
+                    path: /api/orders
+                    timestamp: '2026-10-09T14:30:00.000Z'
+        '422': { $ref: '#/components/responses/CheckoutUnprocessable' }
+        '502': { $ref: '#/components/responses/PaymentProviderError' }
+    get:
+      tags: [orders]
+      operationId: listMyOrders
+      summary: Historique de mes commandes (US-050)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Page de commandes, les plus récentes d'abord
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderSummaryPage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /orders/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [orders]
+      operationId: getMyOrder
+      summary: Détail d'une commande, confirmation (US-030, 031, 035)
+      description: Lit **uniquement** les données gelées de la commande, jamais le catalogue actuel.
+      responses:
+        '200':
+          description: Commande
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /orders/{id}/payment-session:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [orders]
+      operationId: createPaymentSession
+      summary: Réessayer le paiement après un échec (US-034)
+      description: Expire la session `PENDING` précédente s'il y en a une, puis en crée une nouvelle. La réservation de stock n'est **pas** prolongée.
+      responses:
+        '201':
+          description: Nouvelle session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentSession' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`ORDER_NOT_PAYABLE`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '410':
+          description: '`RESERVATION_EXPIRED` : la commande est annulée, il faut en repasser une'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502': { $ref: '#/components/responses/PaymentProviderError' }
+
+  /orders/{id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [orders]
+      operationId: cancelMyOrder
+      summary: Annuler une commande non payée
+      responses:
+        '200':
+          description: Commande `CANCELLED`, stock réintégré
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  # ───────────────────────────── PAYMENTS ─────────────────────────────
+  /payments/stripe/webhook:
+    post:
+      tags: [payments]
+      operationId: stripeWebhook
+      summary: Webhook Stripe (US-033 à 035)
+      description: |
+        Appelé par Stripe uniquement. Corps brut nécessaire pour vérifier la signature.
+        Événements traités : `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+        `checkout.session.async_payment_failed`, `checkout.session.expired`, `charge.refunded`.
+        Idempotent (`PaymentEvent.providerEventId`).
+      security: []
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Événement reçu (traité ou ignoré car déjà vu) }
+        '400':
+          description: '`WEBHOOK_SIGNATURE_INVALID`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ───────────────────────────── ADMIN CATALOG ─────────────────────────────
+  /admin/categories:
+    get:
+      tags: [admin-catalog]
+      operationId: adminListCategories
+      summary: Catégories (back-office)
+      responses:
+        '200':
+          description: Liste
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Category' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [admin-catalog]
+      operationId: adminCreateCategory
+      summary: Créer une catégorie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryInput' }
+      responses:
+        '201':
+          description: Créée
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/categories/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [admin-catalog]
+      operationId: adminUpdateCategory
+      summary: Modifier une catégorie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryInput' }
+      responses:
+        '200':
+          description: Modifiée
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/products:
+    get:
+      tags: [admin-catalog]
+      operationId: adminListProducts
+      summary: Catalogue back-office (archivés inclus, stock exact)
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: archived
+          in: query
+          schema: { type: boolean }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminProductPage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [admin-catalog]
+      operationId: adminCreateProduct
+      summary: Créer un produit avec ses variantes (US-080)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateProductRequest' }
+      responses:
+        '201':
+          description: Créé
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminProduct' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Slug ou SKU déjà utilisé (`VALIDATION_ERROR` avec `details[].field`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/products/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [admin-catalog]
+      operationId: adminGetProduct
+      summary: Détail produit (back-office)
+      responses:
+        '200':
+          description: Produit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminProduct' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [admin-catalog]
+      operationId: adminUpdateProduct
+      summary: Modifier un produit (US-081), sans effet sur les commandes passées
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateProductRequest' }
+      responses:
+        '200':
+          description: Modifié
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminProduct' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/products/{id}/archive:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [admin-catalog]
+      operationId: adminArchiveProduct
+      summary: Archiver (retirer de la vente sans supprimer) (US-082)
+      responses:
+        '200':
+          description: Archivé
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminProduct' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/products/{id}/variants:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [admin-catalog]
+      operationId: adminCreateVariant
+      summary: Ajouter une variante (US-080)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateVariantRequest' }
+      responses:
+        '201':
+          description: Variante créée
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminVariant' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/variants/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [admin-catalog]
+      operationId: adminUpdateVariant
+      summary: Modifier une variante (prix, libellé, archivage). Le stock se modifie via `stock-adjustments`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateVariantRequest' }
+      responses:
+        '200':
+          description: Modifiée
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminVariant' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/variants/{id}/stock-adjustments:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [admin-catalog]
+      operationId: adminAdjustStock
+      summary: Ajuster le stock d'une variante (US-005)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StockAdjustmentRequest' }
+      responses:
+        '201':
+          description: Mouvement enregistré
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminVariant' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StockConflict' }
+
+  # ───────────────────────────── ADMIN ORDERS ─────────────────────────────
+  /admin/orders:
+    get:
+      tags: [admin-orders]
+      operationId: adminListOrders
+      summary: Commandes (US-083)
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/OrderStatus' }
+        - name: q
+          in: query
+          description: Numéro de commande ou email client
+          schema: { type: string }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOrderSummaryPage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/orders/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [admin-orders]
+      operationId: adminGetOrder
+      summary: Détail commande (back-office, US-083)
+      responses:
+        '200':
+          description: Commande avec client et paiements
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOrder' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/orders/{id}/transitions:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [admin-orders]
+      operationId: adminTransitionOrder
+      summary: Changer le statut d'une commande (US-083)
+      description: Transitions autorisées dans `docs/API.md#états-commande-et-paiement`. `PAID` est réservé au webhook.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderTransitionRequest' }
+      responses:
+        '200':
+          description: Commande mise à jour
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOrder' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+        '502': { $ref: '#/components/responses/PaymentProviderError' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token, 15 min (D-019)
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+
+  headers:
+    SetRefreshCookie:
+      description: '`refresh_token=…; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age=2592000`'
+      schema: { type: string }
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+
+  responses:
+    ValidationError:
+      description: '`VALIDATION_ERROR`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            statusCode: 400
+            code: VALIDATION_ERROR
+            message: Certains champs sont invalides.
+            details:
+              - { field: quantity, constraints: ['quantity must not be less than 1'] }
+            path: /api/cart/items
+            timestamp: '2026-10-09T14:30:00.000Z'
+    Unauthenticated:
+      description: '`UNAUTHENTICATED` ou `TOKEN_EXPIRED`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            statusCode: 401
+            code: TOKEN_EXPIRED
+            message: Session expirée.
+            path: /api/cart
+            timestamp: '2026-10-09T14:30:00.000Z'
+    Forbidden:
+      description: '`FORBIDDEN`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            statusCode: 403
+            code: FORBIDDEN
+            message: Accès refusé.
+            path: /api/admin/orders
+            timestamp: '2026-10-09T14:30:00.000Z'
+    NotFound:
+      description: '`NOT_FOUND`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            statusCode: 404
+            code: NOT_FOUND
+            message: Ressource introuvable.
+            path: /api/products/inconnu
+            timestamp: '2026-10-09T14:30:00.000Z'
+    StockConflict:
+      description: '`OUT_OF_STOCK` ou `PRODUCT_UNAVAILABLE`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            statusCode: 409
+            code: OUT_OF_STOCK
+            message: Stock insuffisant pour 1 article.
+            details:
+              - { variantId: b0000000-0000-4000-8000-000000000012, sku: EG-100G, requested: 5, available: 3 }
+            path: /api/cart/items
+            timestamp: '2026-10-09T14:30:00.000Z'
+    InvalidTransition:
+      description: '`INVALID_ORDER_TRANSITION`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            statusCode: 409
+            code: INVALID_ORDER_TRANSITION
+            message: Transition de statut non autorisée.
+            details: { from: SHIPPED, to: CANCELLED, allowed: [DELIVERED] }
+            path: /api/admin/orders/d0000000-0000-4000-8000-000000000001/transitions
+            timestamp: '2026-10-09T14:30:00.000Z'
+    ShippingZoneNotServed:
+      description: '`SHIPPING_ZONE_NOT_SERVED`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            statusCode: 422
+            code: SHIPPING_ZONE_NOT_SERVED
+            message: Nous ne livrons pas encore cette zone (France métropolitaine continentale uniquement).
+            details: { postalCode: '20000', country: FR }
+            path: /api/checkout/quote
+            timestamp: '2026-10-09T14:30:00.000Z'
+    CheckoutUnprocessable:
+      description: '`CART_EMPTY`, `SHIPPING_ZONE_NOT_SERVED`, `SHIPPING_METHOD_UNAVAILABLE` ou `AGE_DECLARATION_REQUIRED`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            statusCode: 422
+            code: AGE_DECLARATION_REQUIRED
+            message: Votre panier contient des produits réservés aux personnes majeures.
+            details: [{ sku: CBD-AMN-3G }]
+            path: /api/orders
+            timestamp: '2026-10-09T14:30:00.000Z'
+    RateLimited:
+      description: '`RATE_LIMITED`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PaymentProviderError:
+      description: '`PAYMENT_PROVIDER_ERROR`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    # ── transverses ──
+    Error:
+      type: object
+      required: [statusCode, code, message, path, timestamp]
+      properties:
+        statusCode: { type: integer, example: 409 }
+        code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - WEBHOOK_SIGNATURE_INVALID
+            - UNAUTHENTICATED
+            - TOKEN_EXPIRED
+            - INVALID_CREDENTIALS
+            - FORBIDDEN
+            - NOT_FOUND
+            - EMAIL_ALREADY_USED
+            - OUT_OF_STOCK
+            - PRODUCT_UNAVAILABLE
+            - PRICE_CHANGED
+            - INVALID_ORDER_TRANSITION
+            - ORDER_NOT_PAYABLE
+            - IDEMPOTENCY_KEY_REUSED
+            - RESERVATION_EXPIRED
+            - CART_EMPTY
+            - SHIPPING_ZONE_NOT_SERVED
+            - SHIPPING_METHOD_UNAVAILABLE
+            - AGE_DECLARATION_REQUIRED
+            - RATE_LIMITED
+            - PAYMENT_PROVIDER_ERROR
+            - INTERNAL_ERROR
+        message: { type: string, description: "Texte lisible en français (peut changer, ne pas s'en servir comme clé)" }
+        details:
+          description: Contexte propre au code (voir docs/API.md)
+          oneOf:
+            - type: array
+              items: { type: object, additionalProperties: true }
+            - type: object
+              additionalProperties: true
+        path: { type: string, example: /api/orders }
+        timestamp: { type: string, format: date-time }
+
+    PageMeta:
+      type: object
+      required: [page, limit, total, totalPages]
+      properties:
+        page: { type: integer, example: 1 }
+        limit: { type: integer, example: 20 }
+        total: { type: integer, example: 6 }
+        totalPages: { type: integer, example: 1 }
+
+    VatLine:
+      type: object
+      description: Ventilation de TVA pour un taux (D-007, D-009)
+      required: [rateBps, baseCents, vatCents, totalCents]
+      properties:
+        rateBps: { type: integer, example: 550 }
+        baseCents: { type: integer, description: Montant HT, example: 2816 }
+        vatCents: { type: integer, example: 155 }
+        totalCents: { type: integer, description: Montant TTC, example: 2971 }
+
+    # ── compte ──
+    Role:
+      type: string
+      enum: [CUSTOMER, ADMIN]
+    User:
+      type: object
+      required: [id, email, firstName, lastName, role, createdAt]
+      properties:
+        id: { type: string, format: uuid, example: e0000000-0000-4000-8000-000000000001 }
+        email: { type: string, format: email, example: camille.martin@example.com }
+        firstName: { type: string, example: Camille }
+        lastName: { type: string, example: Martin }
+        phone: { type: string, nullable: true, example: '0612345678' }
+        role: { $ref: '#/components/schemas/Role' }
+        createdAt: { type: string, format: date-time }
+    RegisterRequest:
+      type: object
+      required: [email, password, firstName, lastName]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 10, maxLength: 72, description: 'Au moins 10 caractères (72 max : limite bcrypt)' }
+        firstName: { type: string, minLength: 1, maxLength: 100 }
+        lastName: { type: string, minLength: 1, maxLength: 100 }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    AuthResponse:
+      type: object
+      required: [accessToken, expiresIn, user]
+      properties:
+        accessToken: { type: string, example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock.signature }
+        expiresIn: { type: integer, description: Secondes, example: 900 }
+        user: { $ref: '#/components/schemas/User' }
+    UpdateProfileRequest:
+      type: object
+      minProperties: 1
+      properties:
+        firstName: { type: string, minLength: 1, maxLength: 100 }
+        lastName: { type: string, minLength: 1, maxLength: 100 }
+        phone: { type: string, nullable: true, pattern: '^0[1-9]\d{8}$' }
+
+    ShippingAddress:
+      type: object
+      description: France métropolitaine continentale uniquement (D-003)
+      required: [firstName, lastName, line1, postalCode, city, country, phone]
+      properties:
+        firstName: { type: string, maxLength: 100, example: Camille }
+        lastName: { type: string, maxLength: 100, example: Martin }
+        line1: { type: string, maxLength: 200, example: 12 rue des Lilas }
+        line2: { type: string, maxLength: 200, nullable: true }
+        postalCode: { type: string, pattern: '^\d{5}$', example: '69003' }
+        city: { type: string, maxLength: 100, example: Lyon }
+        country: { type: string, enum: [FR], example: FR }
+        phone: { type: string, pattern: '^0[1-9]\d{8}$', example: '0612345678' }
+    AddressInput:
+      allOf:
+        - $ref: '#/components/schemas/ShippingAddress'
+        - type: object
+          properties:
+            label: { type: string, maxLength: 50, nullable: true, example: Maison }
+            isDefault: { type: boolean, default: false }
+    Address:
+      allOf:
+        - $ref: '#/components/schemas/AddressInput'
+        - type: object
+          required: [id, isDefault]
+          properties:
+            id: { type: string, format: uuid }
+
+    # ── catalogue ──
+    ProductType:
+      type: string
+      enum: [TEA, COFFEE, CBD, BOX, ADVENT_CALENDAR, ACCESSORY]
+    Availability:
+      type: string
+      description: '`IN_STOCK` (> 5), `LOW_STOCK` (1 à 5), `OUT_OF_STOCK` (0). La quantité exacte n''est pas publique.'
+      enum: [IN_STOCK, LOW_STOCK, OUT_OF_STOCK]
+    Image:
+      type: object
+      required: [url, alt]
+      properties:
+        url: { type: string, example: https://cdn.brume.dev/products/earl-grey-imperial-1.jpg }
+        alt: { type: string, example: Earl Grey Impérial en vrac }
+    Category:
+      type: object
+      required: [id, name, slug, position]
+      properties:
+        id: { type: string, format: uuid, example: c0000000-0000-4000-8000-000000000001 }
+        name: { type: string, example: Thés }
+        slug: { type: string, example: thes }
+        description: { type: string, nullable: true }
+        parentId: { type: string, format: uuid, nullable: true }
+        position: { type: integer, example: 1 }
+    CategoryInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 100 }
+        slug: { type: string, maxLength: 120, description: Généré depuis le nom s'il est absent }
+        description: { type: string, nullable: true }
+        parentId: { type: string, format: uuid, nullable: true }
+        position: { type: integer }
+    CategoryRef:
+      type: object
+      required: [id, name, slug]
+      properties:
+        id: { type: string, format: uuid, example: c0000000-0000-4000-8000-000000000001 }
+        name: { type: string, example: Thés }
+        slug: { type: string, example: thes }
+    Variant:
+      type: object
+      required: [id, sku, label, priceCents, weightGrams, availability]
+      properties:
+        id: { type: string, format: uuid, example: b0000000-0000-4000-8000-000000000012 }
+        sku: { type: string, example: EG-100G }
+        label: { type: string, example: 100 g }
+        priceCents: { type: integer, description: TTC, example: 1290 }
+        weightGrams: { type: integer, example: 100 }
+        availability: { $ref: '#/components/schemas/Availability' }
+    BoxComponent:
+      type: object
+      required: [sku, productName, variantLabel, quantity]
+      properties:
+        sku: { type: string, example: EG-50G }
+        productName: { type: string, example: Earl Grey Impérial }
+        variantLabel: { type: string, example: 50 g }
+        quantity: { type: integer, example: 1 }
+        position: { type: integer, nullable: true, description: Jour (Calendrier de l'Avent) }
+    ProductSummary:
+      type: object
+      required: [id, slug, name, type, category, fromPriceCents, availability, ageRestricted]
+      properties:
+        id: { type: string, format: uuid, example: a0000000-0000-4000-8000-000000000001 }
+        slug: { type: string, example: earl-grey-imperial }
+        name: { type: string, example: Earl Grey Impérial }
+        type: { $ref: '#/components/schemas/ProductType' }
+        shortDescription: { type: string, nullable: true, example: Thé noir à la bergamote de Calabre. }
+        category: { $ref: '#/components/schemas/CategoryRef' }
+        image: { type: object, allOf: [{ $ref: '#/components/schemas/Image' }], nullable: true }
+        fromPriceCents: { type: integer, description: Prix de la variante la moins chère, example: 790 }
+        availability: { $ref: '#/components/schemas/Availability' }
+        ageRestricted: { type: boolean, example: false }
+    ProductDetail:
+      allOf:
+        - $ref: '#/components/schemas/ProductSummary'
+        - type: object
+          required: [vatRateBps, images, ingredients, attributes, variants]
+          properties:
+            description: { type: string, nullable: true, description: Markdown }
+            origin: { type: string, nullable: true, example: 'Inde, Darjeeling' }
+            vatRateBps: { type: integer, example: 550 }
+            attributes:
+              type: object
+              additionalProperties: true
+              example: { caffeine: high, steepTimeMinutes: 4, waterTempCelsius: 95 }
+            images:
+              type: array
+              items: { $ref: '#/components/schemas/Image' }
+            ingredients:
+              type: array
+              items:
+                type: object
+                required: [name, slug]
+                properties:
+                  name: { type: string, example: Bergamote }
+                  slug: { type: string, example: bergamote }
+            variants:
+              type: array
+              minItems: 1
+              items: { $ref: '#/components/schemas/Variant' }
+            components:
+              type: array
+              nullable: true
+              description: Contenu d'une box / du calendrier (null sinon)
+              items: { $ref: '#/components/schemas/BoxComponent' }
+    ProductSummaryPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ProductSummary' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+
+    # ── panier ──
+    CartItem:
+      type: object
+      required: [id, variantId, sku, productName, productSlug, variantLabel, unitPriceCents, quantity, lineTotalCents, availability, ageRestricted]
+      properties:
+        id: { type: string, format: uuid, example: 90000000-0000-4000-8000-000000000001 }
+        variantId: { type: string, format: uuid, example: b0000000-0000-4000-8000-000000000012 }
+        sku: { type: string, example: EG-100G }
+        productName: { type: string, example: Earl Grey Impérial }
+        productSlug: { type: string, example: earl-grey-imperial }
+        variantLabel: { type: string, example: 100 g }
+        imageUrl: { type: string, nullable: true }
+        unitPriceCents: { type: integer, description: Prix actuel TTC, example: 1290 }
+        quantity: { type: integer, minimum: 1, maximum: 99, example: 2 }
+        lineTotalCents: { type: integer, example: 2580 }
+        availability: { $ref: '#/components/schemas/Availability' }
+        ageRestricted: { type: boolean, example: false }
+    CartWarning:
+      type: object
+      required: [code, sku]
+      properties:
+        code: { type: string, enum: [OUT_OF_STOCK, QUANTITY_REDUCED, PRODUCT_UNAVAILABLE] }
+        sku: { type: string, example: EG-100G }
+        message: { type: string }
+    Cart:
+      type: object
+      required: [id, items, itemsCount, itemsTotalCents, ageRestricted, warnings]
+      properties:
+        id: { type: string, format: uuid }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CartItem' }
+        itemsCount: { type: integer, description: Somme des quantités, example: 3 }
+        itemsTotalCents: { type: integer, description: Sous-total articles TTC (hors livraison), example: 4070 }
+        ageRestricted: { type: boolean, description: Le panier contient au moins un produit 18+, example: true }
+        warnings:
+          type: array
+          description: Problèmes détectés à la lecture (variante archivée, stock passé sous la quantité…)
+          items: { $ref: '#/components/schemas/CartWarning' }
+    AddCartItemRequest:
+      type: object
+      required: [variantId, quantity]
+      properties:
+        variantId: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1, maximum: 99 }
+    UpdateCartItemRequest:
+      type: object
+      required: [quantity]
+      properties:
+        quantity: { type: integer, minimum: 1, maximum: 99 }
+    MergeCartRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/AddCartItemRequest' }
+
+    # ── checkout ──
+    ShippingMethod:
+      type: object
+      required: [code, name, carrier, priceCents, estimatedDaysMin, estimatedDaysMax]
+      properties:
+        code: { type: string, example: HOME }
+        name: { type: string, example: Livraison à domicile }
+        carrier: { type: string, example: Colissimo }
+        priceCents: { type: integer, description: TTC, example: 590 }
+        freeFromCents: { type: integer, nullable: true, description: Offerte dès ce sous-total articles, example: 4900 }
+        estimatedDaysMin: { type: integer, example: 2 }
+        estimatedDaysMax: { type: integer, example: 3 }
+    QuoteRequest:
+      type: object
+      required: [shippingMethodCode]
+      properties:
+        shippingMethodCode: { type: string, example: HOME }
+        shippingAddress:
+          type: object
+          description: Facultative pour le devis ; si `postalCode` est présent, la zone est vérifiée
+          properties:
+            postalCode: { type: string, pattern: '^\d{5}$' }
+            country: { type: string, enum: [FR] }
+    CreateOrderRequest:
+      type: object
+      required: [shippingAddress, shippingMethodCode, ageDeclaration, expectedTotalCents]
+      properties:
+        shippingAddress: { $ref: '#/components/schemas/ShippingAddress' }
+        shippingMethodCode: { type: string, example: HOME }
+        ageDeclaration:
+          type: boolean
+          description: '« Je certifie avoir 18 ans ou plus ». Doit valoir `true` si le panier est `ageRestricted` (D-002)'
+        expectedTotalCents:
+          type: integer
+          description: Total affiché au client. Comparé au total recalculé, ne fixe **jamais** le prix
+          example: 4660
+    QuoteLine:
+      type: object
+      required: [variantId, sku, productName, variantLabel, unitPriceCents, quantity, lineTotalCents, vatRateBps]
+      properties:
+        variantId: { type: string, format: uuid }
+        sku: { type: string }
+        productName: { type: string }
+        variantLabel: { type: string }
+        unitPriceCents: { type: integer }
+        quantity: { type: integer }
+        lineTotalCents: { type: integer }
+        vatRateBps: { type: integer }
+    Quote:
+      type: object
+      required: [items, itemsTotalCents, discountCents, shippingCents, totalCents, vatBreakdown, shippingMethod, ageDeclarationRequired, freeShippingRemainingCents]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/QuoteLine' }
+        itemsTotalCents: { type: integer, example: 4070 }
+        discountCents: { type: integer, example: 0 }
+        shippingCents: { type: integer, example: 590 }
+        totalCents: { type: integer, example: 4660 }
+        vatBreakdown:
+          type: array
+          items: { $ref: '#/components/schemas/VatLine' }
+        shippingMethod: { $ref: '#/components/schemas/ShippingMethod' }
+        ageDeclarationRequired: { type: boolean, example: true }
+        freeShippingRemainingCents:
+          type: integer
+          nullable: true
+          description: Montant restant avant la livraison offerte (null si déjà offerte ou pas de seuil)
+          example: 830
+      example:
+        items:
+          - { variantId: b0000000-0000-4000-8000-000000000012, sku: EG-100G, productName: Earl Grey Impérial, variantLabel: 100 g, unitPriceCents: 1290, quantity: 2, lineTotalCents: 2580, vatRateBps: 550 }
+          - { variantId: b0000000-0000-4000-8000-000000000041, sku: CBD-AMN-3G, productName: Fleurs CBD Amnesia, variantLabel: 3 g, unitPriceCents: 1490, quantity: 1, lineTotalCents: 1490, vatRateBps: 2000 }
+        itemsTotalCents: 4070
+        discountCents: 0
+        shippingCents: 590
+        totalCents: 4660
+        vatBreakdown:
+          - { rateBps: 550, baseCents: 2816, vatCents: 155, totalCents: 2971 }
+          - { rateBps: 2000, baseCents: 1407, vatCents: 282, totalCents: 1689 }
+        shippingMethod: { code: HOME, name: Livraison à domicile, carrier: Colissimo, priceCents: 590, freeFromCents: 4900, estimatedDaysMin: 2, estimatedDaysMax: 3 }
+        ageDeclarationRequired: true
+        freeShippingRemainingCents: 830
+
+    # ── commandes ──
+    OrderStatus:
+      type: string
+      enum: [PENDING_PAYMENT, PAID, PREPARING, SHIPPED, DELIVERED, CANCELLED]
+    CancellationReason:
+      type: string
+      enum: [PAYMENT_EXPIRED, CUSTOMER, ADMIN]
+    OrderItem:
+      type: object
+      description: Ligne **gelée** au moment de la commande (copie, aucune lecture du catalogue)
+      required: [id, sku, productName, variantLabel, productType, unitPriceCents, vatRateBps, quantity, lineTotalCents]
+      properties:
+        id: { type: string, format: uuid }
+        sku: { type: string, example: EG-100G }
+        productName: { type: string, example: Earl Grey Impérial }
+        variantLabel: { type: string, example: 100 g }
+        productType: { $ref: '#/components/schemas/ProductType' }
+        unitPriceCents: { type: integer, example: 1290 }
+        vatRateBps: { type: integer, example: 550 }
+        quantity: { type: integer, example: 2 }
+        lineTotalCents: { type: integer, example: 2580 }
+        imageUrl: { type: string, nullable: true }
+        components:
+          type: array
+          nullable: true
+          items: { $ref: '#/components/schemas/BoxComponent' }
+    Shipment:
+      type: object
+      required: [carrier, trackingNumber, shippedAt]
+      properties:
+        carrier: { type: string, example: Colissimo }
+        trackingNumber: { type: string, example: 6A12345678901 }
+        trackingUrl: { type: string, nullable: true }
+        shippedAt: { type: string, format: date-time }
+        deliveredAt: { type: string, format: date-time, nullable: true }
+    Order:
+      type: object
+      required: [id, number, status, currency, items, itemsTotalCents, discountCents, shippingCents, totalCents, vatBreakdown, shippingAddress, shippingMethod, refundedCents, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, example: BR-2026-000001 }
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        currency: { type: string, enum: [EUR] }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/OrderItem' }
+        itemsTotalCents: { type: integer }
+        discountCents: { type: integer }
+        shippingCents: { type: integer }
+        totalCents: { type: integer }
+        vatBreakdown:
+          type: array
+          items: { $ref: '#/components/schemas/VatLine' }
+        shippingAddress: { $ref: '#/components/schemas/ShippingAddress' }
+        shippingMethod:
+          type: object
+          required: [code, name]
+          properties:
+            code: { type: string }
+            name: { type: string }
+        reservationExpiresAt: { type: string, format: date-time, nullable: true, description: Renseigné tant que `PENDING_PAYMENT` }
+        paidAt: { type: string, format: date-time, nullable: true }
+        cancelledAt: { type: string, format: date-time, nullable: true }
+        cancellationReason: { type: string, allOf: [{ $ref: '#/components/schemas/CancellationReason' }], nullable: true }
+        refundedCents: { type: integer }
+        shipment: { type: object, allOf: [{ $ref: '#/components/schemas/Shipment' }], nullable: true }
+        createdAt: { type: string, format: date-time }
+      example:
+        id: d0000000-0000-4000-8000-000000000001
+        number: BR-2026-000001
+        status: PAID
+        currency: EUR
+        items:
+          - { id: d1000000-0000-4000-8000-000000000001, sku: EG-100G, productName: Earl Grey Impérial, variantLabel: 100 g, productType: TEA, unitPriceCents: 1290, vatRateBps: 550, quantity: 2, lineTotalCents: 2580, imageUrl: 'https://cdn.brume.dev/products/earl-grey-imperial-1.jpg', components: null }
+          - { id: d1000000-0000-4000-8000-000000000002, sku: CBD-AMN-3G, productName: Fleurs CBD Amnesia, variantLabel: 3 g, productType: CBD, unitPriceCents: 1490, vatRateBps: 2000, quantity: 1, lineTotalCents: 1490, imageUrl: 'https://cdn.brume.dev/products/fleurs-cbd-amnesia-1.jpg', components: null }
+        itemsTotalCents: 4070
+        discountCents: 0
+        shippingCents: 590
+        totalCents: 4660
+        vatBreakdown:
+          - { rateBps: 550, baseCents: 2816, vatCents: 155, totalCents: 2971 }
+          - { rateBps: 2000, baseCents: 1407, vatCents: 282, totalCents: 1689 }
+        shippingAddress: { firstName: Camille, lastName: Martin, line1: 12 rue des Lilas, line2: null, postalCode: '69003', city: Lyon, country: FR, phone: '0612345678' }
+        shippingMethod: { code: HOME, name: Livraison à domicile }
+        reservationExpiresAt: null
+        paidAt: '2026-10-09T14:32:10.000Z'
+        cancelledAt: null
+        cancellationReason: null
+        refundedCents: 0
+        shipment: null
+        createdAt: '2026-10-09T14:30:00.000Z'
+    OrderSummary:
+      type: object
+      required: [id, number, status, totalCents, itemsCount, createdAt]
+      properties:
+        id: { type: string, format: uuid, example: d0000000-0000-4000-8000-000000000001 }
+        number: { type: string, example: BR-2026-000001 }
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        totalCents: { type: integer, example: 4660 }
+        itemsCount: { type: integer, example: 3 }
+        createdAt: { type: string, format: date-time }
+    OrderSummaryPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/OrderSummary' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+
+    # ── paiement ──
+    PaymentStatus:
+      type: string
+      enum: [PENDING, SUCCEEDED, FAILED, EXPIRED]
+    PaymentSession:
+      type: object
+      required: [paymentId, checkoutUrl, expiresAt]
+      properties:
+        paymentId: { type: string, format: uuid, example: f1000000-0000-4000-8000-000000000001 }
+        checkoutUrl: { type: string, format: uri, example: 'https://checkout.stripe.com/c/pay/cs_test_mock' }
+        expiresAt: { type: string, format: date-time, description: = `Order.reservationExpiresAt` }
+    CreateOrderResponse:
+      type: object
+      required: [order, payment]
+      properties:
+        order: { $ref: '#/components/schemas/Order' }
+        payment: { $ref: '#/components/schemas/PaymentSession' }
+      example:
+        order:
+          id: d0000000-0000-4000-8000-000000000002
+          number: BR-2026-000002
+          status: PENDING_PAYMENT
+          currency: EUR
+          items:
+            - { id: d1000000-0000-4000-8000-000000000011, sku: EG-100G, productName: Earl Grey Impérial, variantLabel: 100 g, productType: TEA, unitPriceCents: 1290, vatRateBps: 550, quantity: 2, lineTotalCents: 2580, imageUrl: null, components: null }
+            - { id: d1000000-0000-4000-8000-000000000012, sku: CBD-AMN-3G, productName: Fleurs CBD Amnesia, variantLabel: 3 g, productType: CBD, unitPriceCents: 1490, vatRateBps: 2000, quantity: 1, lineTotalCents: 1490, imageUrl: null, components: null }
+          itemsTotalCents: 4070
+          discountCents: 0
+          shippingCents: 590
+          totalCents: 4660
+          vatBreakdown:
+            - { rateBps: 550, baseCents: 2816, vatCents: 155, totalCents: 2971 }
+            - { rateBps: 2000, baseCents: 1407, vatCents: 282, totalCents: 1689 }
+          shippingAddress: { firstName: Camille, lastName: Martin, line1: 12 rue des Lilas, line2: null, postalCode: '69003', city: Lyon, country: FR, phone: '0612345678' }
+          shippingMethod: { code: HOME, name: Livraison à domicile }
+          reservationExpiresAt: '2026-10-09T15:00:00.000Z'
+          paidAt: null
+          cancelledAt: null
+          cancellationReason: null
+          refundedCents: 0
+          shipment: null
+          createdAt: '2026-10-09T14:30:00.000Z'
+        payment:
+          paymentId: f1000000-0000-4000-8000-000000000002
+          checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_mock'
+          expiresAt: '2026-10-09T15:00:00.000Z'
+    Payment:
+      type: object
+      required: [id, status, amountCents, providerSessionId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/PaymentStatus' }
+        amountCents: { type: integer, example: 4660 }
+        providerSessionId: { type: string, example: cs_test_mock }
+        failureCode: { type: string, nullable: true, example: card_declined }
+        failureMessage: { type: string, nullable: true }
+        succeededAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    # ── admin ──
+    AdminVariant:
+      allOf:
+        - $ref: '#/components/schemas/Variant'
+        - type: object
+          required: [stockQuantity, position, archived]
+          properties:
+            stockQuantity: { type: integer, example: 30 }
+            position: { type: integer, example: 2 }
+            archived: { type: boolean, example: false }
+    AdminProduct:
+      allOf:
+        - $ref: '#/components/schemas/ProductDetail'
+        - type: object
+          required: [archived, createdAt, updatedAt, adminVariants]
+          properties:
+            archived: { type: boolean }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+            adminVariants:
+              type: array
+              description: Toutes les variantes, archivées incluses, avec stock exact
+              items: { $ref: '#/components/schemas/AdminVariant' }
+    AdminProductPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/AdminProduct' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+    CreateVariantRequest:
+      type: object
+      required: [sku, label, priceCents, weightGrams]
+      properties:
+        sku: { type: string, pattern: '^[A-Z0-9-]{2,40}$', example: EG-1KG }
+        label: { type: string, maxLength: 60, example: 1 kg }
+        priceCents: { type: integer, minimum: 1, example: 8900 }
+        weightGrams: { type: integer, minimum: 1, example: 1000 }
+        initialStock: { type: integer, minimum: 0, default: 0 }
+        position: { type: integer }
+    UpdateVariantRequest:
+      type: object
+      minProperties: 1
+      properties:
+        label: { type: string, maxLength: 60 }
+        priceCents: { type: integer, minimum: 1 }
+        weightGrams: { type: integer, minimum: 1 }
+        position: { type: integer }
+        archived: { type: boolean }
+    CreateProductRequest:
+      type: object
+      required: [name, type, categoryId, vatRateBps, variants]
+      properties:
+        name: { type: string, maxLength: 150 }
+        slug: { type: string, maxLength: 170, description: Généré depuis le nom s'il est absent }
+        type: { $ref: '#/components/schemas/ProductType' }
+        categoryId: { type: string, format: uuid }
+        shortDescription: { type: string, maxLength: 300, nullable: true }
+        description: { type: string, nullable: true }
+        vatRateBps: { type: integer, enum: [550, 2000] }
+        ageRestricted: { type: boolean, description: 'Par défaut : `true` si type = CBD' }
+        origin: { type: string, maxLength: 100, nullable: true }
+        attributes: { type: object, additionalProperties: true }
+        images:
+          type: array
+          items: { $ref: '#/components/schemas/Image' }
+        ingredientSlugs:
+          type: array
+          items: { type: string }
+        variants:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/CreateVariantRequest' }
+        components:
+          type: array
+          description: Uniquement pour BOX / ADVENT_CALENDAR
+          items:
+            type: object
+            required: [componentVariantId, quantity]
+            properties:
+              componentVariantId: { type: string, format: uuid }
+              quantity: { type: integer, minimum: 1 }
+              position: { type: integer }
+    UpdateProductRequest:
+      type: object
+      minProperties: 1
+      description: Mêmes champs que la création, tous facultatifs, sauf `variants` (voir routes variantes) et `type` (non modifiable)
+      properties:
+        name: { type: string, maxLength: 150 }
+        slug: { type: string, maxLength: 170 }
+        categoryId: { type: string, format: uuid }
+        shortDescription: { type: string, maxLength: 300, nullable: true }
+        description: { type: string, nullable: true }
+        vatRateBps: { type: integer, enum: [550, 2000] }
+        ageRestricted: { type: boolean }
+        origin: { type: string, maxLength: 100, nullable: true }
+        attributes: { type: object, additionalProperties: true }
+        images:
+          type: array
+          items: { $ref: '#/components/schemas/Image' }
+        ingredientSlugs:
+          type: array
+          items: { type: string }
+    StockAdjustmentRequest:
+      type: object
+      required: [delta, reason]
+      properties:
+        delta: { type: integer, not: { enum: [0] }, description: 'Positif = entrée, négatif = sortie. Le stock ne peut pas devenir négatif (`OUT_OF_STOCK`)', example: 20 }
+        reason: { type: string, minLength: 3, maxLength: 200, example: Réception fournisseur du 09/10 }
+    AdminOrderSummary:
+      allOf:
+        - $ref: '#/components/schemas/OrderSummary'
+        - type: object
+          required: [customerEmail, customerName]
+          properties:
+            customerEmail: { type: string, example: camille.martin@example.com }
+            customerName: { type: string, example: Camille Martin }
+    AdminOrderSummaryPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/AdminOrderSummary' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+    AdminOrder:
+      allOf:
+        - $ref: '#/components/schemas/Order'
+        - type: object
+          required: [customer, payments, ageDeclaredAt]
+          properties:
+            customer:
+              type: object
+              required: [id, email, firstName, lastName]
+              properties:
+                id: { type: string, format: uuid }
+                email: { type: string }
+                firstName: { type: string }
+                lastName: { type: string }
+            ageDeclaredAt: { type: string, format: date-time, nullable: true }
+            payments:
+              type: array
+              items: { $ref: '#/components/schemas/Payment' }
+    OrderTransitionRequest:
+      type: object
+      required: [to]
+      properties:
+        to:
+          type: string
+          enum: [PREPARING, SHIPPED, DELIVERED, CANCELLED]
+          description: '`PAID` est réservé au webhook'
+        carrier: { type: string, description: Obligatoire si `to = SHIPPED` }
+        trackingNumber: { type: string, description: Obligatoire si `to = SHIPPED` }
+        reason: { type: string, maxLength: 200, description: Obligatoire si `to = CANCELLED` }
