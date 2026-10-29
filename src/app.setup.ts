@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { AuthConfig } from './modules/auth/auth.config';
 import { ApiExceptionFilter } from './common/filters/api-exception.filter';
@@ -21,6 +21,15 @@ export function configureApp(app: INestApplication) {
       forbidNonWhitelisted: true,
       transform: true,
       validationError: { target: false, value: false },
+      exceptionFactory: (errors) =>
+        new BadRequestException({
+          code: 'VALIDATION_ERROR',
+          message: 'Certains champs sont invalides.',
+          details: errors.map((error) => ({
+            field: error.property,
+            constraints: Object.keys(error.constraints ?? {}),
+          })),
+        }),
     }),
   );
 }

@@ -61,7 +61,7 @@ Les propriétés TypeScript et JSON restent en camelCase. Les noms SQL suivent l
 
 UUID et timestamps communs : colonnes `id`, `created_at`, `updated_at`. Aucun mot de passe stocké. L'e-mail ne sert jamais à fusionner deux identités Google. Voir [AUTH.md](AUTH.md).
 
-### `Address` (P1 : US-048, prête pour le checkout)
+### `Address` — `adresses` (US-048, implémentée)
 | Champ | Type | Contraintes |
 |---|---|---|
 | userId | uuid FK → User | ON DELETE CASCADE |
@@ -83,7 +83,7 @@ UUID et timestamps communs ; `userId` → `utilisateur_id` (FK, ON DELETE CASCAD
 - `oauth_transactions` : UUID, timestamps, `state_hash` unique, `browser_hash`, `nonce`, `code_verifier`, `expires_at` indexé. Durée de vie 10 minutes ; consommation atomique au callback.
 - `auth_rate_limits` : `key_hash` PK (empreinte de la clé de limitation), `attempts`, `expires_at` indexé. Compteur technique partagé, sans identité client.
 
-Les autres tables de ce document restent une cible ; la migration de cette branche crée uniquement ces quatre tables d'authentification.
+Les quatre tables d’authentification sont complétées par `adresses` via la migration US-048. Les autres tables de ce document restent une cible. Voir [ADDRESSES.md](ADDRESSES.md) pour les règles du carnet et du défaut.
 
 ## Catalogue — `categories`, `products`, `stock`
 

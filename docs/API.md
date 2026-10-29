@@ -57,6 +57,8 @@ npx openapi-typescript@7 docs/contract/openapi.yaml -o src/api/schema.d.ts
 - Une route `/admin/**` appelée sans le rôle ADMIN renvoie `403 FORBIDDEN`.
 - Côté code : `SessionGuard` global avec `@Public()` pour les exceptions ; une autorisation de rôle devra être ajoutée aux futures routes admin.
 
+Les routes de carnet d’adresses US-048 sont implémentées. Exemple de requête, validation, défaut et contrôle du propriétaire : [ADDRESSES.md](ADDRESSES.md).
+
 ## Format d'erreur
 
 Toutes les erreurs ont la même forme. Le filtre global `ApiExceptionFilter` convertit aussi les erreurs du `ValidationPipe` dans ce format :

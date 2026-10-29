@@ -192,6 +192,7 @@ src/
 - [ ] Commande et confirmation
 - [ ] Paiement en ligne : succès, échec, webhooks
 - [x] Inscription et connexion Google SSO, sessions révocables, lecture du profil (`docs/AUTH.md`)
+- [x] Carnet d’adresses client : CRUD, défaut unique et accès par propriétaire ([documentation](docs/ADDRESSES.md))
 - [ ] Modification du profil, historique de commandes
 - [ ] Back-office : produits, commandes, stock
 

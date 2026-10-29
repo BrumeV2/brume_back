@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Brume API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Contrat d'API du MVP Brume (thé, café, CBD) — T-003.
 
@@ -150,7 +150,11 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/Address' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
     post:
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
+        - { name: X-CSRF-Protection, in: header, required: true, schema: { type: string, enum: ['1'] } }
       tags: [users]
       operationId: createMyAddress
       summary: Ajouter une adresse (US-048, P1)
@@ -167,20 +171,26 @@ paths:
               schema: { $ref: '#/components/schemas/Address' }
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ShippingZoneNotServed' }
 
   /users/me/addresses/{id}:
     parameters:
       - $ref: '#/components/parameters/IdPath'
     patch:
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
+        - { name: X-CSRF-Protection, in: header, required: true, schema: { type: string, enum: ['1'] } }
       tags: [users]
       operationId: updateMyAddress
-      summary: Modifier une adresse (US-048, P1)
+      summary: Modifier partiellement une adresse (US-048)
+      description: Au moins un champ. isDefault=true remplace atomiquement le défaut précédent. Une adresse non possédée retourne 404.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/AddressInput' }
+            schema: { $ref: '#/components/schemas/UpdateAddressInput' }
       responses:
         '200':
           description: Modifiée
@@ -189,15 +199,23 @@ paths:
               schema: { $ref: '#/components/schemas/Address' }
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ShippingZoneNotServed' }
     delete:
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
+        - { name: X-CSRF-Protection, in: header, required: true, schema: { type: string, enum: ['1'] } }
       tags: [users]
       operationId: deleteMyAddress
       summary: Supprimer une adresse (US-048, P1)
       responses:
         '204': { description: Supprimée }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   # ───────────────────────────── CATALOG ─────────────────────────────
@@ -1122,19 +1140,54 @@ components:
         country: { type: string, enum: [FR], example: FR }
         phone: { type: string, pattern: '^0[1-9]\d{8}$', example: '0612345678' }
     AddressInput:
-      allOf:
-        - $ref: '#/components/schemas/ShippingAddress'
-        - type: object
-          properties:
-            label: { type: string, maxLength: 50, nullable: true, example: Maison }
-            isDefault: { type: boolean, default: false }
+      type: object
+      additionalProperties: false
+      required: [firstName, lastName, line1, postalCode, city, country, phone]
+      description: France métropolitaine continentale, hors Corse et territoires ultramarins. Sans isDefault, la nouvelle adresse n'est pas définie par défaut.
+      properties:
+        firstName: { type: string, minLength: 1, maxLength: 100 }
+        lastName: { type: string, minLength: 1, maxLength: 100 }
+        line1: { type: string, minLength: 1, maxLength: 200 }
+        line2: { type: string, maxLength: 200, nullable: true }
+        postalCode: { type: string, pattern: '^\d{5}$', example: '69003' }
+        city: { type: string, minLength: 1, maxLength: 100 }
+        country: { type: string, enum: [FR] }
+        phone: { type: string, pattern: '^0[1-9]\d{8}$' }
+        label: { type: string, maxLength: 50, nullable: true, example: Maison }
+        isDefault: { type: boolean }
+    UpdateAddressInput:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: Champs absents conservés. Seuls label et line2 acceptent null.
+      properties:
+        firstName: { type: string, minLength: 1, maxLength: 100 }
+        lastName: { type: string, minLength: 1, maxLength: 100 }
+        line1: { type: string, minLength: 1, maxLength: 200 }
+        line2: { type: string, maxLength: 200, nullable: true }
+        postalCode: { type: string, pattern: '^\d{5}$', example: '69003' }
+        city: { type: string, minLength: 1, maxLength: 100 }
+        country: { type: string, enum: [FR] }
+        phone: { type: string, pattern: '^0[1-9]\d{8}$' }
+        label: { type: string, maxLength: 50, nullable: true, example: Maison }
+        isDefault: { type: boolean }
     Address:
-      allOf:
-        - $ref: '#/components/schemas/AddressInput'
-        - type: object
-          required: [id, isDefault]
-          properties:
-            id: { type: string, format: uuid }
+      type: object
+      required: [id, firstName, lastName, line1, line2, postalCode, city, country, phone, label, isDefault, createdAt, updatedAt]
+      properties:
+        firstName: { type: string, minLength: 1, maxLength: 100 }
+        lastName: { type: string, minLength: 1, maxLength: 100 }
+        line1: { type: string, minLength: 1, maxLength: 200 }
+        line2: { type: string, maxLength: 200, nullable: true }
+        postalCode: { type: string, pattern: '^\d{5}$', example: '69003' }
+        city: { type: string, minLength: 1, maxLength: 100 }
+        country: { type: string, enum: [FR] }
+        phone: { type: string, pattern: '^0[1-9]\d{8}$' }
+        label: { type: string, maxLength: 50, nullable: true, example: Maison }
+        isDefault: { type: boolean }
+        id: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
     # ── catalogue ──
     ProductType:

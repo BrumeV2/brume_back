@@ -13,7 +13,7 @@ L'API propose :
 | GET | `/api/users/me` | Profil du client identifié par la session |
 | POST | `/api/auth/logout` | Révocation de la session courante, suppression du cookie, 204 |
 
-Les anciennes routes proposées `/auth/register`, `/auth/login`, `/auth/refresh` sont retirées du contrat. Le changement de contrat est incompatible : version 1.0.0. Les autres domaines du contrat restent une cible et ne sont pas implémentés par cette branche (commandes, panier, adresses, administration, modification du profil).
+Les anciennes routes proposées `/auth/register`, `/auth/login`, `/auth/refresh` sont retirées du contrat. Le changement de contrat est incompatible : version 1.0.0 pour l’authentification, puis 1.1.0 avec les adresses. Les adresses sont désormais disponibles (voir [ADDRESSES.md](ADDRESSES.md)). Les autres domaines du contrat restent une cible et ne sont pas implémentés par cette branche (commandes, panier, administration, modification du profil).
 
 ## Configuration Google et lancement local
 
@@ -102,7 +102,7 @@ Une session absente, invalide, expirée ou révoquée donne `401 UNAUTHENTICATED
 - Prénom et nom sont facultatifs : Google ne garantit pas leur présence. Le téléphone reste nul à la création. Ces informations pourront être complétées dans la future story de profil.
 - Rôle initial `CUSTOMER`. État initial `ACTIVE`. Un compte `BLOCKED` ne peut ni se connecter ni réutiliser une session antérieure.
 - `/users/me` déduit le propriétaire de la session ; un ID utilisateur envoyé par le client est ignoré. Pour chaque futur domaine, filtrer aussi les ressources par cet utilisateur. Les routes d'administration devront ajouter une autorisation de rôle ; elles ne sont pas encore présentes.
-- La table `adresses` et ses opérations restent hors de ces trois tâches.
+- La gestion des adresses est implémentée séparément dans US-048 : voir [ADDRESSES.md](ADDRESSES.md).
 
 ## Sessions et protection du parcours
 

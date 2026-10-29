@@ -17,7 +17,11 @@ export class ApiExceptionFilter implements ExceptionFilter {
       exception instanceof HttpException ? exception.getResponse() : undefined;
     const safe =
       typeof body === 'object' && body !== null
-        ? (body as { code?: string; message?: string | string[] })
+        ? (body as {
+            code?: string;
+            message?: string | string[];
+            details?: unknown;
+          })
         : undefined;
     const defaults: Record<number, [string, string]> = {
       400: ['VALIDATION_ERROR', 'Requête invalide.'],
@@ -37,6 +41,11 @@ export class ApiExceptionFilter implements ExceptionFilter {
       code: safe?.code ?? code,
       message:
         safe?.code && typeof safe.message === 'string' ? safe.message : message,
+      ...(status === 400 &&
+      safe?.code === 'VALIDATION_ERROR' &&
+      Array.isArray(safe.details)
+        ? { details: safe.details }
+        : {}),
       path: request.originalUrl.split('?')[0],
       timestamp: new Date().toISOString(),
     });

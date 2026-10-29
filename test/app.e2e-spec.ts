@@ -1,3 +1,5 @@
+import { Address } from '../src/modules/users/entities/address.entity';
+import { CreateAddresses1793261709905 } from '../src/database/migrations/1793261709905-CreateAddresses';
 import { jest } from '@jest/globals';
 import {
   Controller,
@@ -139,8 +141,11 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
           username: process.env.TEST_DB_USER ?? 'brume',
           password: process.env.TEST_DB_PASSWORD ?? 'change-me',
           database,
-          entities: [User, Session, OAuthTransaction, AuthRateLimit],
-          migrations: [CreateGoogleAccountsAndSessions1793109589589],
+          entities: [User, Session, OAuthTransaction, AuthRateLimit, Address],
+          migrations: [
+            CreateGoogleAccountsAndSessions1793109589589,
+            CreateAddresses1793261709905,
+          ],
           migrationsRun: true,
           synchronize: false,
           retryAttempts: 0,
@@ -160,7 +165,7 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
   beforeEach(async () => {
     if (!db) return;
     await db.query(
-      'TRUNCATE TABLE sessions, utilisateurs, oauth_transactions, auth_rate_limits CASCADE',
+      'TRUNCATE TABLE adresses, sessions, utilisateurs, oauth_transactions, auth_rate_limits CASCADE',
     );
     jest.clearAllMocks();
   });
@@ -176,14 +181,14 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
     await request(app.getHttpServer()).get('/api/private/any-id').expect(401);
     await request(app.getHttpServer()).get('/api/users/me').expect(401);
   });
-  it('documents the implemented auth routes and profile consistently with the shared contract', () => {
+  it('documents auth, profile and address routes consistently with the shared contract', () => {
     const contract = parse(
       readFileSync('docs/contract/openapi.yaml', 'utf8'),
     ) as OpenAPIObject;
     const document = SwaggerModule.createDocument(
       app,
       new DocumentBuilder()
-        .setVersion('1.0.0')
+        .setVersion('1.1.0')
         .addCookieAuth(
           'brume_session',
           { type: 'apiKey', in: 'cookie' },
@@ -196,6 +201,10 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
       ['/auth/google/callback', 'get'],
       ['/auth/logout', 'post'],
       ['/users/me', 'get'],
+      ['/users/me/addresses', 'get'],
+      ['/users/me/addresses', 'post'],
+      ['/users/me/addresses/{id}', 'patch'],
+      ['/users/me/addresses/{id}', 'delete'],
     ] as const) {
       const expected = contract.paths[path][method]!;
       const actual = document.paths[`/api${path}`][method]!;
@@ -210,11 +219,31 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
           ?.map((parameter) => ('name' in parameter ? parameter.name : ''))
           .sort() ?? [],
       ).toEqual(
-        expected.parameters
-          ?.map((parameter) => ('name' in parameter ? parameter.name : ''))
-          .sort() ?? [],
+        [
+          ...(contract.paths[path].parameters ?? []),
+          ...(expected.parameters ?? []),
+        ]
+          .map((parameter) =>
+            '$ref' in parameter
+              ? contract.components!.parameters![
+                  parameter.$ref.split('/').pop()!
+                ]
+              : parameter,
+          )
+          .map((parameter) => ('name' in parameter ? parameter.name : ''))
+          .sort(),
       );
     }
+    const expectedAddress = contract.components!.schemas!
+      .Address as SchemaObject;
+    const actualAddress = document.components!.schemas!
+      .AddressResponseDto as SchemaObject;
+    expect(actualAddress.required?.sort()).toEqual(
+      expectedAddress.required?.sort(),
+    );
+    expect(Object.keys(actualAddress.properties!).sort()).toEqual(
+      Object.keys(expectedAddress.properties!).sort(),
+    );
     const expectedUser = contract.components!.schemas!.User as SchemaObject;
     const actualUser = document.components!.schemas!
       .UserResponseDto as SchemaObject;
@@ -562,5 +591,271 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
       .set('Origin', 'https://attacker.example')
       .set('Access-Control-Request-Method', 'POST');
     expect(denied.headers['access-control-allow-origin']).toBeUndefined();
+  });
+  const addressInput = {
+    firstName: 'Camille',
+    lastName: 'Martin',
+    line1: '12 rue des Lilas',
+    postalCode: '69003',
+    city: 'Lyon',
+    country: 'FR',
+    phone: '0612345678',
+  };
+  function write(
+    method: 'post' | 'patch' | 'delete',
+    path: string,
+    sessionCookie: string,
+  ) {
+    return request(app.getHttpServer())
+      [method](path)
+      .set('Cookie', sessionCookie)
+      .set('Origin', origin)
+      .set('X-CSRF-Protection', '1');
+  }
+  it('creates, lists, partially updates and deletes a private address', async () => {
+    const a = await login();
+    await request(app.getHttpServer())
+      .get('/api/users/me/addresses')
+      .set('Cookie', a.cookie)
+      .expect(200, []);
+    const created = await write('post', '/api/users/me/addresses', a.cookie)
+      .send({
+        ...addressInput,
+        firstName: ' Camille ',
+        label: 'Maison',
+        line2: 'Appartement 2',
+      })
+      .expect(201);
+    const address = created.body as Address;
+    expect(address).toMatchObject({
+      firstName: 'Camille',
+      isDefault: false,
+      label: 'Maison',
+    });
+    expect(address).not.toHaveProperty('userId');
+    expect(address).not.toHaveProperty('user');
+    const patched = await write(
+      'patch',
+      `/api/users/me/addresses/${address.id}`,
+      a.cookie,
+    )
+      .send({ city: 'Villeurbanne', label: null, line2: null })
+      .expect(200);
+    expect(patched.body).toMatchObject({
+      id: address.id,
+      city: 'Villeurbanne',
+      firstName: 'Camille',
+      label: null,
+      line2: null,
+    });
+    const listed = await request(app.getHttpServer())
+      .get('/api/users/me/addresses')
+      .set('Cookie', a.cookie)
+      .expect(200);
+    expect(listed.body).toHaveLength(1);
+    await write(
+      'delete',
+      `/api/users/me/addresses/${address.id}`,
+      a.cookie,
+    ).expect(204);
+    await write(
+      'delete',
+      `/api/users/me/addresses/${address.id}`,
+      a.cookie,
+    ).expect(404);
+    await request(app.getHttpServer())
+      .get('/api/users/me/addresses')
+      .set('Cookie', a.cookie)
+      .expect(200, []);
+  });
+  it('prevents another client from listing, updating or deleting an address', async () => {
+    const a = await login();
+    const b = await login('bob');
+    const created = await write('post', '/api/users/me/addresses', a.cookie)
+      .send(addressInput)
+      .expect(201);
+    const id = (created.body as Address).id;
+    await request(app.getHttpServer())
+      .get('/api/users/me/addresses')
+      .set('Cookie', b.cookie)
+      .expect(200, []);
+    await write('patch', `/api/users/me/addresses/${id}`, b.cookie)
+      .send({ city: 'Paris' })
+      .expect(404);
+    await write('delete', `/api/users/me/addresses/${id}`, b.cookie).expect(
+      404,
+    );
+    expect((await db.getRepository(Address).findOneByOrFail({ id })).city).toBe(
+      'Lyon',
+    );
+    await write('post', '/api/users/me/addresses', b.cookie)
+      .send({
+        ...addressInput,
+        userId: (
+          await db.getRepository(User).findOneByOrFail({ email: alice.email })
+        ).id,
+      })
+      .expect(400);
+  });
+  it('rejects missing fields and invalid values with field errors and no submitted values', async () => {
+    const a = await login();
+    const response = await write('post', '/api/users/me/addresses', a.cookie)
+      .send({ firstName: 'private-value' })
+      .expect(400);
+    expect(response.body).toMatchObject({ code: 'VALIDATION_ERROR' });
+    const details = (response.body as { details: { field: string }[] }).details;
+    expect(details.some((detail) => detail.field === 'line1')).toBe(true);
+    expect(JSON.stringify(response.body)).not.toContain('private-value');
+    for (const input of [
+      { ...addressInput, firstName: '   ' },
+      { ...addressInput, phone: 'invalid' },
+      { ...addressInput, postalCode: 'abcde' },
+      { ...addressInput, isDefault: 'true' },
+      { ...addressInput, line1: 'a'.repeat(201) },
+    ]) {
+      await write('post', '/api/users/me/addresses', a.cookie)
+        .send(input)
+        .expect(400);
+    }
+    expect(await db.getRepository(Address).count()).toBe(0);
+  });
+  it.each([
+    ['FR', '20000'],
+    ['FR', '97100'],
+    ['FR', '00000'],
+    ['BE', '10000'],
+  ])('rejects the unsupported zone %s %s', async (country, postalCode) => {
+    const a = await login();
+    const response = await write('post', '/api/users/me/addresses', a.cookie)
+      .send({ ...addressInput, country, postalCode })
+      .expect(422);
+    expect(response.body).toMatchObject({ code: 'SHIPPING_ZONE_NOT_SERVED' });
+    expect(await db.getRepository(Address).count()).toBe(0);
+  });
+  it('rejects empty patches, invalid IDs, null required fields and unknown properties', async () => {
+    const a = await login();
+    const created = await write('post', '/api/users/me/addresses', a.cookie)
+      .send(addressInput)
+      .expect(201);
+    const id = (created.body as Address).id;
+    for (const patch of [
+      {},
+      { city: null },
+      { isDefault: null },
+      { userId: 'forged' },
+      { firstName: 3 },
+    ]) {
+      await write('patch', `/api/users/me/addresses/${id}`, a.cookie)
+        .send(patch)
+        .expect(400);
+    }
+    await write('patch', `/api/users/me/addresses/${id}`, a.cookie)
+      .send({ postalCode: '20000' })
+      .expect(422);
+    await write('patch', '/api/users/me/addresses/not-a-uuid', a.cookie)
+      .send({ city: 'Paris' })
+      .expect(400);
+    await write(
+      'delete',
+      '/api/users/me/addresses/not-a-uuid',
+      a.cookie,
+    ).expect(400);
+    expect((await db.getRepository(Address).findOneByOrFail({ id })).city).toBe(
+      'Lyon',
+    );
+  });
+  it('maintains at most one default address under concurrent creates and updates', async () => {
+    const a = await login();
+    const b = await login('bob');
+    await write('post', '/api/users/me/addresses', b.cookie)
+      .send({ ...addressInput, isDefault: true })
+      .expect(201);
+    const responses = await Promise.all(
+      [1, 2, 3].map((n) =>
+        write('post', '/api/users/me/addresses', a.cookie)
+          .send({ ...addressInput, label: `Address ${n}`, isDefault: true })
+          .expect(201),
+      ),
+    );
+    const user = await db
+      .getRepository(User)
+      .findOneByOrFail({ email: alice.email });
+    expect(
+      await db
+        .getRepository(Address)
+        .countBy({ userId: user.id, isDefault: true }),
+    ).toBe(1);
+    await Promise.all(
+      responses.map((response) =>
+        write(
+          'patch',
+          `/api/users/me/addresses/${(response.body as Address).id}`,
+          a.cookie,
+        )
+          .send({ isDefault: true })
+          .expect(200),
+      ),
+    );
+    expect(
+      await db
+        .getRepository(Address)
+        .countBy({ userId: user.id, isDefault: true }),
+    ).toBe(1);
+    expect(await db.getRepository(Address).countBy({ isDefault: true })).toBe(
+      2,
+    );
+    const defaultAddress = await db
+      .getRepository(Address)
+      .findOneByOrFail({ userId: user.id, isDefault: true });
+    await write(
+      'delete',
+      `/api/users/me/addresses/${defaultAddress.id}`,
+      a.cookie,
+    ).expect(204);
+    expect(
+      await db
+        .getRepository(Address)
+        .countBy({ userId: user.id, isDefault: true }),
+    ).toBe(0);
+  });
+  it('enforces the default-address uniqueness constraint in PostgreSQL', async () => {
+    const a = await login();
+    await write('post', '/api/users/me/addresses', a.cookie)
+      .send({ ...addressInput, isDefault: true })
+      .expect(201);
+    const user = await db
+      .getRepository(User)
+      .findOneByOrFail({ email: alice.email });
+    await expect(
+      db
+        .getRepository(Address)
+        .insert({ ...addressInput, userId: user.id, isDefault: true }),
+    ).rejects.toMatchObject({ driverError: { code: '23505' } });
+  });
+  it('requires authentication and CSRF protection for addresses', async () => {
+    await request(app.getHttpServer())
+      .get('/api/users/me/addresses')
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/api/users/me/addresses')
+      .set('Origin', origin)
+      .set('X-CSRF-Protection', '1')
+      .send(addressInput)
+      .expect(401);
+    const a = await login();
+    await request(app.getHttpServer())
+      .post('/api/users/me/addresses')
+      .set('Cookie', a.cookie)
+      .set('Origin', origin)
+      .send(addressInput)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/api/users/me/addresses')
+      .set('Cookie', a.cookie)
+      .set('Origin', 'https://attacker.example')
+      .set('X-CSRF-Protection', '1')
+      .send(addressInput)
+      .expect(403);
+    expect(await db.getRepository(Address).count()).toBe(0);
   });
 });
