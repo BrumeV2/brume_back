@@ -12,12 +12,12 @@ L'API est un **monolithe modulaire**. Chaque domaine (produits, panier, commande
 src/
 ├── main.ts                     # bootstrap : préfixe /api, CORS, ValidationPipe, Swagger
 ├── app.module.ts               # importe tous les modules
-├── config/                     # config typée (DB, JWT, Swagger) + validation du .env
+├── config/                     # config typée (DB, Google OAuth, sessions, Swagger) + validation du .env
 ├── common/                     # transverse, sans logique métier
 │   ├── entities/base.entity.ts # id UUID + createdAt + updatedAt (toutes les entités en héritent)
 │   ├── enums/role.enum.ts      # CUSTOMER | ADMIN
 │   ├── decorators/             # @CurrentUser(), @Roles(), @Public()
-│   ├── guards/                 # JwtAuthGuard (global), RolesGuard
+│   ├── guards/                 # SessionGuard (global), RolesGuard
 │   ├── filters/                # format d'erreur uniforme
 │   ├── dto/                    # pagination
 │   └── utils/money.util.ts     # calculs en centimes
@@ -61,7 +61,7 @@ Puis l'adapter à ce document :
 1. **Controller = fin.** Il valide (DTO), récupère l'utilisateur (`@CurrentUser()`) et délègue au service. Aucune logique métier.
 2. **Le service porte le métier** : calcul des prix, vérification du stock, transitions de statut.
 3. **Pas de module `admin` fourre-tout.** Les routes back-office d'un domaine vivent **dans ce domaine**, dans un `admin-<domaine>.controller.ts` préfixé `admin/` et protégé par `@Roles(Role.ADMIN)`. Le module `admin/` ne contient que le dashboard (indicateurs transverses).
-4. **Auth par défaut.** `JwtAuthGuard` est global ; les routes publiques (catalogue, FAQ, blog…) sont marquées `@Public()`.
+4. **Auth par défaut.** `SessionGuard` est global ; les routes publiques (catalogue, FAQ, blog…) sont marquées `@Public()`.
 5. **Argent en centimes**, calculé côté serveur uniquement (`common/utils/money.util.ts`).
 6. **Transactions** pour toute opération qui touche plusieurs tables (création de commande = commande + lignes + décrément de stock + vidage du panier).
 7. **Fournisseurs externes derrière une interface** (ex. `payments/providers/payment-provider.interface.ts`) pour pouvoir changer de PSP ou mocker en test.

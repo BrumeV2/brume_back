@@ -20,7 +20,7 @@ npx @redocly/cli@1 preview-docs docs/contract/openapi.yaml
 npx openapi-typescript@7 docs/contract/openapi.yaml -o src/api/schema.d.ts
 ```
 
-- [`contract/seed.json`](contract/seed.json) est le **jeu de données de référence** (catégories, produits, variantes, livraison, comptes de test, une commande payée). Le front s'en sert pour ses fixtures. Le back le chargera via une migration de seed.
+- [`contract/seed.json`](contract/seed.json) est le **jeu de données de référence** (catégories, produits, variantes, livraison, comptes de test, une commande payée). Le front s'en sert pour ses fixtures. Les comptes de ce fichier sont uniquement des profils fictifs pour le mock, sans identifiants Google utilisables. Ils ne provisionnent pas de comptes réels ni de compte administrateur. Le chargement des autres fixtures fera l'objet d'une migration de seed distincte.
 - Pour le back, `GET /api/docs-json` (Swagger généré) doit rester **conforme** à `openapi.yaml`. Un test de conformité sera ajouté en CI.
 
 ## Conventions
@@ -40,9 +40,12 @@ npx openapi-typescript@7 docs/contract/openapi.yaml -o src/api/schema.d.ts
 
 ## Authentification et contrôle d'accès
 
-- `POST /auth/login` et `POST /auth/register` renvoient un `accessToken` (JWT, 15 min) et posent un cookie `refresh_token` httpOnly (D-019).
-- Les routes protégées attendent le header `Authorization: Bearer <accessToken>`.
-- Sur une `401` avec le code `TOKEN_EXPIRED`, le front appelle `POST /auth/refresh` puis rejoue la requête.
+- Connexion et inscription Google uniquement via `GET /auth/google` puis `GET /auth/google/callback`.
+- Le callback pose un cookie opaque `brume_session` HttpOnly, Secure hors localhost, SameSite=Lax. Aucun jeton applicatif n'est restitué dans le JSON.
+- Le front envoie `credentials: 'include'`. Les mutations exigent une `Origin` autorisée et `X-CSRF-Protection: 1`.
+- Chaque requête privée vérifie la session en base, son expiration, sa révocation et l'état du compte. Une 401 impose une nouvelle connexion ; il n'y a pas de route refresh.
+- `POST /auth/logout` révoque uniquement la session courante et retourne 204 après persistance réussie.
+- Configuration, intégration front et validation : [`AUTH.md`](AUTH.md).
 
 | Rôle | Accès |
 |---|---|
@@ -52,11 +55,13 @@ npx openapi-typescript@7 docs/contract/openapi.yaml -o src/api/schema.d.ts
 
 - Une ressource qui appartient à un autre client renvoie **`404`** et pas `403`, pour ne pas révéler qu'elle existe.
 - Une route `/admin/**` appelée sans le rôle ADMIN renvoie `403 FORBIDDEN`.
-- Côté code : `JwtAuthGuard` global avec `@Public()` pour les exceptions, et `RolesGuard` avec `@Roles(Role.ADMIN)`.
+- Côté code : `SessionGuard` global avec `@Public()` pour les exceptions ; une autorisation de rôle devra être ajoutée aux futures routes admin.
+
+Les routes de carnet d’adresses US-048 sont implémentées. Exemple de requête, validation, défaut et contrôle du propriétaire : [ADDRESSES.md](ADDRESSES.md).
 
 ## Format d'erreur
 
-Toutes les erreurs ont la même forme. Le filtre global `HttpExceptionFilter` convertit aussi les erreurs du `ValidationPipe` dans ce format :
+Toutes les erreurs ont la même forme. Le filtre global `ApiExceptionFilter` convertit aussi les erreurs du `ValidationPipe` dans ce format :
 
 ```json
 {
@@ -77,12 +82,10 @@ Le front se base sur `code`, qui est stable. `message` est un texte en français
 |---|---|---|---|
 | 400 | `VALIDATION_ERROR` | DTO invalide | `[{ field, constraints[] }]` |
 | 400 | `WEBHOOK_SIGNATURE_INVALID` | signature Stripe incorrecte | — |
-| 401 | `UNAUTHENTICATED` | jeton absent ou invalide | — |
-| 401 | `TOKEN_EXPIRED` | access token expiré : il faut appeler `/auth/refresh` | — |
-| 401 | `INVALID_CREDENTIALS` | email ou mot de passe incorrect (message volontairement vague) | — |
+| 401 | `UNAUTHENTICATED` | identité Google refusée, compte non autorisé ou session absente, expirée ou révoquée | — |
+| 503 | `AUTH_UNAVAILABLE` | fournisseur ou stockage indisponible | — |
 | 403 | `FORBIDDEN` | rôle insuffisant | — |
 | 404 | `NOT_FOUND` | ressource inexistante, archivée côté public, ou appartenant à un autre client | — |
-| 409 | `EMAIL_ALREADY_USED` | inscription avec un email existant | — |
 | 409 | `OUT_OF_STOCK` | ajout au panier, modification ou création de commande au-delà du stock | `[{ variantId, sku, requested, available }]` |
 | 409 | `PRODUCT_UNAVAILABLE` | variante ou produit archivé | `[{ variantId, sku }]` |
 | 409 | `PRICE_CHANGED` | `expectedTotalCents` différent du total recalculé | `{ expectedTotalCents, actualTotalCents }` |
@@ -103,10 +106,9 @@ Le front se base sur `code`, qui est stable. `message` est un texte en français
 |---|---|---|---|
 | GET | `/health` | public | — |
 | **Auth** | | | |
-| POST | `/auth/register` | public | 045 |
-| POST | `/auth/login` | public | 046 |
-| POST | `/auth/refresh` | cookie | 046 |
-| POST | `/auth/logout` | cookie | 046 |
+| GET | `/auth/google` | public | 045, 046 |
+| GET | `/auth/google/callback` | transaction navigateur | 045, 046 |
+| POST | `/auth/logout` | cookie + CSRF | ADD-087 |
 | **Compte** | | | |
 | GET / PATCH | `/users/me` | CUSTOMER | 047 |
 | GET / POST | `/users/me/addresses` | CUSTOMER | 048 (P1) |

@@ -5,7 +5,8 @@
     {
       "id": "e0000000-0000-4000-8000-000000000001",
       "email": "camille.martin@example.com",
-      "password": "BrumeClient2026!",
+      "status": "ACTIVE",
+      "emailVerifiedAt": "2026-10-27T12:00:00.000Z",
       "firstName": "Camille",
       "lastName": "Martin",
       "phone": "0612345678",
@@ -14,7 +15,8 @@
     {
       "id": "e0000000-0000-4000-8000-000000000002",
       "email": "admin@brume.dev",
-      "password": "BrumeAdmin2026!",
+      "status": "ACTIVE",
+      "emailVerifiedAt": "2026-10-27T12:00:00.000Z",
       "firstName": "Admin",
       "lastName": "Brume",
       "phone": null,

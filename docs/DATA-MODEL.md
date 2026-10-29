@@ -22,7 +22,7 @@ erDiagram
     USER ||--o{ ADDRESS : possede
     USER ||--o| CART : a
     USER ||--o{ ORDER : passe
-    USER ||--o{ REFRESH_TOKEN : a
+    USER ||--o{ SESSION : a
 
     CATEGORY ||--o{ CATEGORY : parent
     CATEGORY ||--o{ PRODUCT : classe
@@ -43,18 +43,25 @@ erDiagram
     PAYMENT_EVENT }o--|| PAYMENT : concerne
 ```
 
-## Compte — `users`
+## Compte — `utilisateurs`
 
 ### `User`
-| Champ | Type | Contraintes | Note |
-|---|---|---|---|
-| email | varchar(254) | UNIQUE, stocké en minuscules | |
-| passwordHash | varchar | NOT NULL | bcrypt, coût 12 ; jamais exposé par l'API |
-| firstName / lastName | varchar(100) | NOT NULL | |
-| phone | varchar(20) | NULL | |
-| role | enum `Role` | défaut `CUSTOMER` | `CUSTOMER`, `ADMIN` |
 
-### `Address` (P1 : US-048, prête pour le checkout)
+Les propriétés TypeScript et JSON restent en camelCase. Les noms SQL suivent le schéma de comptes fourni.
+
+| Propriété | Colonne SQL | Type / contraintes |
+|---|---|---|
+| googleSub | google_sub | varchar(255), UNIQUE, NOT NULL, non exposé |
+| email | email | varchar(254), UNIQUE, NOT NULL, normalisé en minuscules |
+| firstName / lastName | prenom / nom | varchar(100), NULL |
+| phone | telephone | varchar(30), NULL |
+| role | role | enum `user_role` : CUSTOMER (défaut), ADMIN |
+| status | statut | enum `account_status` : ACTIVE (défaut), BLOCKED |
+| emailVerifiedAt | email_verifie_at | timestamptz, NOT NULL, e-mail Google vérifié exigé |
+
+UUID et timestamps communs : colonnes `id`, `created_at`, `updated_at`. Aucun mot de passe stocké. L'e-mail ne sert jamais à fusionner deux identités Google. Voir [AUTH.md](AUTH.md).
+
+### `Address` — `adresses` (US-048, implémentée)
 | Champ | Type | Contraintes |
 |---|---|---|
 | userId | uuid FK → User | ON DELETE CASCADE |
@@ -67,8 +74,16 @@ erDiagram
 | phone | varchar(20) | NOT NULL (exigé par le transporteur) |
 | isDefault | boolean | une seule à `true` par utilisateur (index unique partiel) |
 
-### `RefreshToken` (D-019)
-`userId`, `tokenHash` (UNIQUE), `expiresAt`, `revokedAt` NULL, `replacedById` NULL.
+### `Session` — `sessions` (D-019)
+
+UUID et timestamps communs ; `userId` → `utilisateur_id` (FK, ON DELETE CASCADE), `tokenHash` → `token_hash` (varchar(64), UNIQUE, non exposé), `expiresAt` → `expires_at` (timestamptz, indexé), `revokedAt` → `revoked_at` (timestamptz, NULL). Plusieurs sessions par utilisateur ; empreinte SHA-256 uniquement, expiration absolue.
+
+### Tables temporaires d'authentification
+
+- `oauth_transactions` : UUID, timestamps, `state_hash` unique, `browser_hash`, `nonce`, `code_verifier`, `expires_at` indexé. Durée de vie 10 minutes ; consommation atomique au callback.
+- `auth_rate_limits` : `key_hash` PK (empreinte de la clé de limitation), `attempts`, `expires_at` indexé. Compteur technique partagé, sans identité client.
+
+Les quatre tables d’authentification sont complétées par `adresses` via la migration US-048. Les autres tables de ce document restent une cible. Voir [ADDRESSES.md](ADDRESSES.md) pour les règles du carnet et du défaut.
 
 ## Catalogue — `categories`, `products`, `stock`
 

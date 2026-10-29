@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Brume API
-  version: 0.1.0
+  version: 1.1.0
   description: |
     Contrat d'API du MVP Brume (thé, café, CBD) — T-003.
 
@@ -29,7 +29,7 @@ tags:
   - name: admin-orders
 
 security:
-  - bearerAuth: []
+  - sessionCookie: []
 
 paths:
   /health:
@@ -50,98 +50,59 @@ paths:
                   status: { type: string, example: ok }
 
   # ───────────────────────────── AUTH ─────────────────────────────
-  /auth/register:
-    post:
+  /auth/google:
+    get:
       tags: [auth]
-      operationId: register
-      summary: Créer un compte (US-045)
+      operationId: startGoogleLogin
+      summary: Inscription ou connexion Google (US-045, US-046)
+      description: Crée une transaction de dix minutes liée au navigateur, avec state, nonce et PKCE S256.
       security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/RegisterRequest' }
       responses:
-        '201':
-          description: Compte créé, utilisateur connecté. Pose le cookie `refresh_token`.
+        '302':
+          description: Redirection vers Google. Cookie temporaire brume_oauth HttpOnly, SameSite=Lax, Path=/api/auth.
           headers:
-            Set-Cookie: { $ref: '#/components/headers/SetRefreshCookie' }
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AuthResponse' }
-        '400': { $ref: '#/components/responses/ValidationError' }
-        '409':
-          description: '`EMAIL_ALREADY_USED`'
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-              example:
-                statusCode: 409
-                code: EMAIL_ALREADY_USED
-                message: Un compte existe déjà avec cet email.
-                path: /api/auth/register
-                timestamp: '2026-10-09T14:30:00.000Z'
+            Location: { schema: { type: string, format: uri } }
+            Set-Cookie: { schema: { type: string } }
         '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
 
-  /auth/login:
-    post:
+  /auth/google/callback:
+    get:
       tags: [auth]
-      operationId: login
-      summary: Se connecter (US-046)
+      operationId: finishGoogleLogin
+      summary: Vérifier Google et créer la session applicative
+      description: Vérifie la transaction à usage unique, le jeton Google et le compte. Aucun jeton dans la réponse ou la redirection.
       security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/LoginRequest' }
+      parameters:
+        - { name: state, in: query, schema: { type: string, maxLength: 128 } }
+        - { name: code, in: query, schema: { type: string, maxLength: 4096 } }
+        - { name: error, in: query, schema: { type: string, maxLength: 255 } }
       responses:
-        '200':
-          description: Connecté. Pose le cookie `refresh_token`.
+        '302':
+          description: Session créée. Redirection vers AUTH_SUCCESS_URL configurée côté serveur, identique pour un nouveau compte et un compte existant.
           headers:
-            Set-Cookie: { $ref: '#/components/headers/SetRefreshCookie' }
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AuthResponse' }
-        '400': { $ref: '#/components/responses/ValidationError' }
-        '401':
-          description: '`INVALID_CREDENTIALS`'
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-              example:
-                statusCode: 401
-                code: INVALID_CREDENTIALS
-                message: Email ou mot de passe incorrect.
-                path: /api/auth/login
-                timestamp: '2026-10-09T14:30:00.000Z'
-        '429': { $ref: '#/components/responses/RateLimited' }
-
-  /auth/refresh:
-    post:
-      tags: [auth]
-      operationId: refresh
-      summary: Renouveler l'access token (rotation du refresh token)
-      security:
-        - refreshCookie: []
-      responses:
-        '200':
-          description: Nouveau jeton. Le cookie est remplacé.
-          headers:
-            Set-Cookie: { $ref: '#/components/headers/SetRefreshCookie' }
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AuthResponse' }
+            Location: { schema: { type: string, format: uri } }
+            Set-Cookie: { $ref: '#/components/headers/SetSessionCookie' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
 
   /auth/logout:
     post:
       tags: [auth]
       operationId: logout
-      summary: Se déconnecter (révoque le refresh token)
+      summary: Révoquer uniquement la session courante (ADD-087)
+      description: Exige Origin autorisée et X-CSRF-Protection à 1. Idempotent pour une session absente ou déjà révoquée. Aucun 204 si la révocation en base échoue.
       security:
-        - refreshCookie: []
+        - sessionCookie: []
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
+        - { name: X-CSRF-Protection, in: header, required: true, schema: { type: string, enum: ['1'] } }
       responses:
-        '204': { description: 'Déconnecté, cookie effacé' }
+        '204':
+          description: Session révoquée ou déjà absente, cookie effacé.
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
 
   # ───────────────────────────── USERS ─────────────────────────────
   /users/me:
@@ -156,6 +117,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/User' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
     patch:
       tags: [users]
       operationId: updateMe
@@ -188,7 +150,11 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/Address' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
     post:
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
+        - { name: X-CSRF-Protection, in: header, required: true, schema: { type: string, enum: ['1'] } }
       tags: [users]
       operationId: createMyAddress
       summary: Ajouter une adresse (US-048, P1)
@@ -205,20 +171,26 @@ paths:
               schema: { $ref: '#/components/schemas/Address' }
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ShippingZoneNotServed' }
 
   /users/me/addresses/{id}:
     parameters:
       - $ref: '#/components/parameters/IdPath'
     patch:
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
+        - { name: X-CSRF-Protection, in: header, required: true, schema: { type: string, enum: ['1'] } }
       tags: [users]
       operationId: updateMyAddress
-      summary: Modifier une adresse (US-048, P1)
+      summary: Modifier partiellement une adresse (US-048)
+      description: Au moins un champ. isDefault=true remplace atomiquement le défaut précédent. Une adresse non possédée retourne 404.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/AddressInput' }
+            schema: { $ref: '#/components/schemas/UpdateAddressInput' }
       responses:
         '200':
           description: Modifiée
@@ -227,15 +199,23 @@ paths:
               schema: { $ref: '#/components/schemas/Address' }
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ShippingZoneNotServed' }
     delete:
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
+        - { name: X-CSRF-Protection, in: header, required: true, schema: { type: string, enum: ['1'] } }
       tags: [users]
       operationId: deleteMyAddress
       summary: Supprimer une adresse (US-048, P1)
       responses:
         '204': { description: Supprimée }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   # ───────────────────────────── CATALOG ─────────────────────────────
@@ -922,19 +902,15 @@ paths:
 
 components:
   securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-      description: Access token, 15 min (D-019)
-    refreshCookie:
+    sessionCookie:
       type: apiKey
       in: cookie
-      name: refresh_token
+      name: brume_session
+      description: Session opaque HttpOnly, Secure en production, SameSite=Lax. Expiration absolue configurable (24 h par défaut). Toute mutation exige une Origin autorisée et X-CSRF-Protection à 1.
 
   headers:
-    SetRefreshCookie:
-      description: '`refresh_token=…; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age=2592000`'
+    SetSessionCookie:
+      description: 'brume_session=…; HttpOnly; Secure; SameSite=Lax; Path=/api; Max-Age=86400 (Secure désactivable uniquement en développement local)'
       schema: { type: string }
 
   parameters:
@@ -953,6 +929,11 @@ components:
       schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
 
   responses:
+    AuthUnavailable:
+      description: '`AUTH_UNAVAILABLE` — service indisponible, aucune donnée sensible.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     ValidationError:
       description: '`VALIDATION_ERROR`'
       content:
@@ -967,14 +948,14 @@ components:
             path: /api/cart/items
             timestamp: '2026-10-09T14:30:00.000Z'
     Unauthenticated:
-      description: '`UNAUTHENTICATED` ou `TOKEN_EXPIRED`'
+      description: '`UNAUTHENTICATED`'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
           example:
             statusCode: 401
-            code: TOKEN_EXPIRED
-            message: Session expirée.
+            code: UNAUTHENTICATED
+            message: Authentification impossible.
             path: /api/cart
             timestamp: '2026-10-09T14:30:00.000Z'
     Forbidden:
@@ -1072,11 +1053,9 @@ components:
             - VALIDATION_ERROR
             - WEBHOOK_SIGNATURE_INVALID
             - UNAUTHENTICATED
-            - TOKEN_EXPIRED
-            - INVALID_CREDENTIALS
+            - AUTH_UNAVAILABLE
             - FORBIDDEN
             - NOT_FOUND
-            - EMAIL_ALREADY_USED
             - OUT_OF_STOCK
             - PRODUCT_UNAVAILABLE
             - PRICE_CHANGED
@@ -1127,36 +1106,18 @@ components:
       enum: [CUSTOMER, ADMIN]
     User:
       type: object
-      required: [id, email, firstName, lastName, role, createdAt]
+      required: [id, email, firstName, lastName, phone, role, status, emailVerifiedAt, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid, example: e0000000-0000-4000-8000-000000000001 }
         email: { type: string, format: email, example: camille.martin@example.com }
-        firstName: { type: string, example: Camille }
-        lastName: { type: string, example: Martin }
+        firstName: { type: string, nullable: true, example: Camille }
+        lastName: { type: string, nullable: true, example: Martin }
         phone: { type: string, nullable: true, example: '0612345678' }
         role: { $ref: '#/components/schemas/Role' }
+        status: { type: string, enum: [ACTIVE, BLOCKED] }
+        emailVerifiedAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
-    RegisterRequest:
-      type: object
-      required: [email, password, firstName, lastName]
-      properties:
-        email: { type: string, format: email, maxLength: 254 }
-        password: { type: string, minLength: 10, maxLength: 72, description: 'Au moins 10 caractères (72 max : limite bcrypt)' }
-        firstName: { type: string, minLength: 1, maxLength: 100 }
-        lastName: { type: string, minLength: 1, maxLength: 100 }
-    LoginRequest:
-      type: object
-      required: [email, password]
-      properties:
-        email: { type: string, format: email }
-        password: { type: string }
-    AuthResponse:
-      type: object
-      required: [accessToken, expiresIn, user]
-      properties:
-        accessToken: { type: string, example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock.signature }
-        expiresIn: { type: integer, description: Secondes, example: 900 }
-        user: { $ref: '#/components/schemas/User' }
+        updatedAt: { type: string, format: date-time }
     UpdateProfileRequest:
       type: object
       minProperties: 1
@@ -1179,19 +1140,54 @@ components:
         country: { type: string, enum: [FR], example: FR }
         phone: { type: string, pattern: '^0[1-9]\d{8}$', example: '0612345678' }
     AddressInput:
-      allOf:
-        - $ref: '#/components/schemas/ShippingAddress'
-        - type: object
-          properties:
-            label: { type: string, maxLength: 50, nullable: true, example: Maison }
-            isDefault: { type: boolean, default: false }
+      type: object
+      additionalProperties: false
+      required: [firstName, lastName, line1, postalCode, city, country, phone]
+      description: France métropolitaine continentale, hors Corse et territoires ultramarins. Sans isDefault, la nouvelle adresse n'est pas définie par défaut.
+      properties:
+        firstName: { type: string, minLength: 1, maxLength: 100 }
+        lastName: { type: string, minLength: 1, maxLength: 100 }
+        line1: { type: string, minLength: 1, maxLength: 200 }
+        line2: { type: string, maxLength: 200, nullable: true }
+        postalCode: { type: string, pattern: '^\d{5}$', example: '69003' }
+        city: { type: string, minLength: 1, maxLength: 100 }
+        country: { type: string, enum: [FR] }
+        phone: { type: string, pattern: '^0[1-9]\d{8}$' }
+        label: { type: string, maxLength: 50, nullable: true, example: Maison }
+        isDefault: { type: boolean }
+    UpdateAddressInput:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: Champs absents conservés. Seuls label et line2 acceptent null.
+      properties:
+        firstName: { type: string, minLength: 1, maxLength: 100 }
+        lastName: { type: string, minLength: 1, maxLength: 100 }
+        line1: { type: string, minLength: 1, maxLength: 200 }
+        line2: { type: string, maxLength: 200, nullable: true }
+        postalCode: { type: string, pattern: '^\d{5}$', example: '69003' }
+        city: { type: string, minLength: 1, maxLength: 100 }
+        country: { type: string, enum: [FR] }
+        phone: { type: string, pattern: '^0[1-9]\d{8}$' }
+        label: { type: string, maxLength: 50, nullable: true, example: Maison }
+        isDefault: { type: boolean }
     Address:
-      allOf:
-        - $ref: '#/components/schemas/AddressInput'
-        - type: object
-          required: [id, isDefault]
-          properties:
-            id: { type: string, format: uuid }
+      type: object
+      required: [id, firstName, lastName, line1, line2, postalCode, city, country, phone, label, isDefault, createdAt, updatedAt]
+      properties:
+        firstName: { type: string, minLength: 1, maxLength: 100 }
+        lastName: { type: string, minLength: 1, maxLength: 100 }
+        line1: { type: string, minLength: 1, maxLength: 200 }
+        line2: { type: string, maxLength: 200, nullable: true }
+        postalCode: { type: string, pattern: '^\d{5}$', example: '69003' }
+        city: { type: string, minLength: 1, maxLength: 100 }
+        country: { type: string, enum: [FR] }
+        phone: { type: string, pattern: '^0[1-9]\d{8}$' }
+        label: { type: string, maxLength: 50, nullable: true, example: Maison }
+        isDefault: { type: boolean }
+        id: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
     # ── catalogue ──
     ProductType:
