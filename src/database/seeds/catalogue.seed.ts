@@ -1,9 +1,11 @@
 import { Box } from '../../modules/products/entities/box.entity';
 import { Ingredient } from '../../modules/products/entities/ingredient.entity';
+import { ProductFormat } from '../../modules/products/entities/product-format.entity';
 import { Product } from '../../modules/products/entities/product.entity';
 import { CaffeineLevel } from '../../modules/products/enums/caffeine-level.enum';
 import { ConsumptionMoment } from '../../modules/products/enums/consumption-moment.enum';
 import { IngredientType } from '../../modules/products/enums/ingredient-type.enum';
+import { Packaging } from '../../modules/products/enums/packaging.enum';
 import dataSource from '../data-source';
 
 // Jeu de données de dev : vide le catalogue puis le remplit (prix en centimes)
@@ -100,14 +102,19 @@ const ingredients = [
   },
 ];
 
+// Chaque produit est vendu en plusieurs formats (conditionnement + grammage), avec prix et stock
 const products = [
   {
     name: 'Earl Grey Brume',
     description: 'Thé noir à la bergamote, le classique de la maison',
-    price: 890,
     origin: 'Inde',
     typeTea: 'noir',
-    quantity: 120,
+    formats: [
+      { packaging: Packaging.BAG, quantity: 50, price: 590, stock: 40 },
+      { packaging: Packaging.BAG, quantity: 100, price: 890, stock: 18 },
+      { packaging: Packaging.BOX, quantity: 100, price: 990, stock: 25 },
+      { packaging: Packaging.TIN, quantity: 150, price: 1390, stock: 10 },
+    ],
     howMuchCaffeine: CaffeineLevel.HIGH,
     moment: ConsumptionMoment.MORNING,
     ingredients: ['Thé noir Assam', 'Huile essentielle de bergamote'],
@@ -115,10 +122,13 @@ const products = [
   {
     name: 'Sencha Nature',
     description: 'Thé vert japonais pur',
-    price: 990,
     origin: 'Japon',
     typeTea: 'vert',
-    quantity: 80,
+    formats: [
+      { packaging: Packaging.BAG, quantity: 50, price: 650, stock: 35 },
+      { packaging: Packaging.BOX, quantity: 100, price: 1090, stock: 20 },
+      { packaging: Packaging.TIN, quantity: 150, price: 1490, stock: 8 },
+    ],
     howMuchCaffeine: CaffeineLevel.MEDIUM,
     moment: ConsumptionMoment.NOON,
     ingredients: ['Thé vert Sencha'],
@@ -126,10 +136,12 @@ const products = [
   {
     name: 'Jardin de Roses',
     description: 'Thé vert aux pétales de rose et fruits rouges',
-    price: 1090,
     origin: 'Japon',
     typeTea: 'vert',
-    quantity: 60,
+    formats: [
+      { packaging: Packaging.BAG, quantity: 50, price: 690, stock: 15 },
+      { packaging: Packaging.BOX, quantity: 100, price: 1190, stock: 6 },
+    ],
     howMuchCaffeine: CaffeineLevel.MEDIUM,
     moment: ConsumptionMoment.SNACK,
     ingredients: ['Thé vert Sencha', 'Pétales de rose', 'Arôme fruits rouges'],
@@ -137,10 +149,13 @@ const products = [
   {
     name: 'Chaï Épicé',
     description: 'Thé noir, cannelle et gingembre',
-    price: 950,
     origin: 'Inde',
     typeTea: 'noir',
-    quantity: 75,
+    formats: [
+      { packaging: Packaging.BAG, quantity: 50, price: 620, stock: 50 },
+      { packaging: Packaging.BOX, quantity: 100, price: 1050, stock: 30 },
+      { packaging: Packaging.TIN, quantity: 150, price: 1450, stock: 12 },
+    ],
     howMuchCaffeine: CaffeineLevel.HIGH,
     moment: ConsumptionMoment.MORNING,
     ingredients: ['Thé noir Assam', 'Cannelle', 'Gingembre'],
@@ -148,10 +163,13 @@ const products = [
   {
     name: 'Rooibos Vanille',
     description: 'Rooibos gourmand à la vanille, sans théine',
-    price: 850,
     origin: 'Afrique du Sud',
     typeTea: 'rooibos',
-    quantity: 100,
+    formats: [
+      { packaging: Packaging.BAG, quantity: 50, price: 550, stock: 60 },
+      { packaging: Packaging.BOX, quantity: 100, price: 920, stock: 40 },
+      { packaging: Packaging.TIN, quantity: 150, price: 1290, stock: 15 },
+    ],
     howMuchCaffeine: CaffeineLevel.NONE,
     moment: ConsumptionMoment.EVENING,
     ingredients: ['Rooibos', 'Arôme vanille'],
@@ -159,10 +177,12 @@ const products = [
   {
     name: 'Pomme d’Hiver',
     description: 'Rooibos, pomme, cannelle et caramel',
-    price: 890,
     origin: 'Afrique du Sud',
     typeTea: 'rooibos',
-    quantity: 50,
+    formats: [
+      { packaging: Packaging.BAG, quantity: 50, price: 590, stock: 20 },
+      { packaging: Packaging.BOX, quantity: 100, price: 990, stock: 5 },
+    ],
     howMuchCaffeine: CaffeineLevel.NONE,
     moment: ConsumptionMoment.EVENING,
     ingredients: ['Rooibos', 'Morceaux de pomme', 'Cannelle', 'Arôme caramel'],
@@ -170,10 +190,12 @@ const products = [
   {
     name: 'Nuage Blanc',
     description: 'Thé blanc délicat aux écorces d’orange',
-    price: 1290,
     origin: 'Chine',
     typeTea: 'blanc',
-    quantity: 30,
+    formats: [
+      { packaging: Packaging.BAG, quantity: 50, price: 890, stock: 12 },
+      { packaging: Packaging.BOX, quantity: 100, price: 1590, stock: 4 },
+    ],
     howMuchCaffeine: CaffeineLevel.LOW,
     moment: ConsumptionMoment.SNACK,
     ingredients: ['Thé blanc Pai Mu Tan', 'Écorces d’orange'],
@@ -181,10 +203,12 @@ const products = [
   {
     name: 'Oolong Menthe Fraîche',
     description: 'Oolong floral relevé de menthe poivrée',
-    price: 1390,
     origin: 'Chine',
     typeTea: 'oolong',
-    quantity: 0,
+    formats: [
+      { packaging: Packaging.BAG, quantity: 50, price: 950, stock: 0 },
+      { packaging: Packaging.BOX, quantity: 100, price: 1690, stock: 3 },
+    ],
     howMuchCaffeine: CaffeineLevel.MEDIUM,
     moment: ConsumptionMoment.NOON,
     ingredients: ['Oolong Tie Guan Yin', 'Huile essentielle de menthe poivrée'],
@@ -240,7 +264,7 @@ async function seed() {
 
   await dataSource.transaction(async (manager) => {
     await manager.query(
-      'TRUNCATE "box_products", "product_ingredients", "boxes", "products", "ingredients"',
+      'TRUNCATE "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
     );
 
     const savedIngredients = await manager.save(
@@ -252,6 +276,9 @@ async function seed() {
       products.map((data) =>
         manager.create(Product, {
           ...data,
+          formats: data.formats.map((format) =>
+            manager.create(ProductFormat, format),
+          ),
           image: placeholderImage(data.name, colorByTeaType[data.typeTea]),
           ingredients: data.ingredients.map((name) =>
             ingredientByName.get(name)!,
@@ -272,7 +299,7 @@ async function seed() {
   });
 
   console.log(
-    `Seed OK : ${ingredients.length} ingrédients, ${products.length} produits, ${boxes.length} box`,
+    `Seed OK : ${ingredients.length} ingrédients, ${products.length} produits (${products.reduce((n, p) => n + p.formats.length, 0)} formats), ${boxes.length} box`,
   );
   await dataSource.destroy();
 }
