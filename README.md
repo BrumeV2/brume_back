@@ -25,6 +25,7 @@
 - [Structure du projet](#-structure-du-projet)
 - [Conventions](#-conventions)
 - [Workflow Git](#-workflow-git)
+- [Environnements et CI/CD](docs/ENVIRONNEMENTS-ET-CICD.md)
 - [Roadmap](#-roadmap)
 
 ---
