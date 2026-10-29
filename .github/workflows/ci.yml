@@ -66,10 +66,10 @@ jobs:
       - name: Verification du build
         run: npm run build
 
-  build-and-push-staging:
-    name: Build Docker et Push GHCR (Staging)
+  build-and-push:
+    name: Build Docker et Push GHCR
     needs: verify
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Recuperer le code source
@@ -91,6 +91,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
+            type=raw,value=latest
             type=raw,value=staging
             type=sha,format=short
 
@@ -106,10 +107,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy-staging:
-    name: Deploiement sur VM (Staging)
-    needs: build-and-push-staging
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+  deploy:
+    name: Deploiement sur VM
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: [self-hosted, linux]
     steps:
       - name: Connexion au registre GHCR sur la VM
