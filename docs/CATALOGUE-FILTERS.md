@@ -27,7 +27,7 @@ Les paramètres de sélection acceptent une valeur simple ou un paramètre rép�
 - Filtre absent : aucune restriction sur ce critère.
 - Supprimer un filtre revient à retirer entièrement ce paramètre, pas à envoyer une chaîne vide.
 - Les deux bornes de prix doivent être respectées par **un même format**. Un produit avec des formats à 500 et 1500 centimes ne correspond pas à un intervalle de 700 à 1000.
-- La réponse conserve tous les formats et ingrédients du produit. Le champ `price` reste le prix du format le moins cher (« à partir de »), même si un autre format satisfait le filtre de prix. Le frontend peut identifier les formats correspondants grâce à leurs prix.
+- La réponse conserve tous les ingrédients du produit. Elle ne contient ni prix ni formats : le prix n'existe que sur les formats, exposés par la fiche produit `GET /api/products/{id}`.
 - Les produits sont triés par nom puis UUID. Les filtres sont appliqués avant le comptage et la pagination ; un produit n'apparaît qu'une fois, quel que soit son nombre de formats ou d'ingrédients correspondants.
 
 ## Exemples
