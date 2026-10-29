@@ -1,20 +1,32 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateCatalogue1793263061466 implements MigrationInterface {
-  name = 'CreateCatalogue1793263061466';
+export class CreateCatalogue1793272229451 implements MigrationInterface {
+  name = 'CreateCatalogue1793272229451';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
       `CREATE TYPE "public"."ingredients_type_enum" AS ENUM('base', 'dried_ingredient', 'liquid_flavoring', 'essential_oil')`,
     );
     await queryRunner.query(
-      `CREATE TABLE "ingredients" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "name" character varying NOT NULL, "description" character varying, "type" "public"."ingredients_type_enum" NOT NULL, "price" integer NOT NULL, CONSTRAINT "PK_9240185c8a5507251c9f15e0649" PRIMARY KEY ("id"))`,
+      `CREATE TABLE "ingredients" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "name" character varying NOT NULL, "description" character varying, "type" "public"."ingredients_type_enum" NOT NULL, "price" integer NOT NULL, CONSTRAINT "PK_9240185c8a5507251c9f15e0649" PRIMARY KEY ("id"))`,
     );
     await queryRunner.query(
-      `CREATE TABLE "products" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "name" character varying NOT NULL, "description" character varying, "price" integer NOT NULL, "origin" character varying, "typeTea" character varying, "quantity" integer NOT NULL DEFAULT '0', CONSTRAINT "PK_0806c755e0aca124e67c0cf6d7d" PRIMARY KEY ("id"))`,
+      `CREATE TYPE "public"."product_formats_packaging_enum" AS ENUM('box', 'bag', 'tin')`,
     );
     await queryRunner.query(
-      `CREATE TABLE "boxes" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "name" character varying NOT NULL, "description" character varying, "price" integer NOT NULL, CONSTRAINT "PK_749574b01e0038dae8464fcb445" PRIMARY KEY ("id"))`,
+      `CREATE TABLE "product_formats" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "packaging" "public"."product_formats_packaging_enum" NOT NULL, "quantity" integer NOT NULL, "price" integer NOT NULL, "stock" integer NOT NULL DEFAULT '0', "productId" uuid NOT NULL, CONSTRAINT "UQ_b9b5ec42752bbbc7ac4e510532e" UNIQUE ("productId", "packaging", "quantity"), CONSTRAINT "PK_c3b3ffb50cf150a6e4f7aee436a" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TYPE "public"."products_howmuchcaffeine_enum" AS ENUM('none', 'low', 'medium', 'high')`,
+    );
+    await queryRunner.query(
+      `CREATE TYPE "public"."products_moment_enum" AS ENUM('morning', 'noon', 'snack', 'evening')`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "products" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "name" character varying NOT NULL, "description" character varying, "origin" character varying, "typeTea" character varying, "image" text, "howMuchCaffeine" "public"."products_howmuchcaffeine_enum" NOT NULL, "moment" "public"."products_moment_enum" NOT NULL, CONSTRAINT "PK_0806c755e0aca124e67c0cf6d7d" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "boxes" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "name" character varying NOT NULL, "description" character varying, "price" integer NOT NULL, CONSTRAINT "PK_749574b01e0038dae8464fcb445" PRIMARY KEY ("id"))`,
     );
     await queryRunner.query(
       `CREATE TABLE "product_ingredients" ("productId" uuid NOT NULL, "ingredientId" uuid NOT NULL, CONSTRAINT "PK_48e5271492b738d87ca91625294" PRIMARY KEY ("productId", "ingredientId"))`,
@@ -33,6 +45,9 @@ export class CreateCatalogue1793263061466 implements MigrationInterface {
     );
     await queryRunner.query(
       `CREATE INDEX "IDX_f32b228b03d547524204e04ffd" ON "box_products"  ("productId") `,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "product_formats" ADD CONSTRAINT "FK_2651d041151e34243d78f30aefd" FOREIGN KEY ("productId") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
       `ALTER TABLE "product_ingredients" ADD CONSTRAINT "FK_0c47e7d54540edb8171ebe4e775" FOREIGN KEY ("productId") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE CASCADE`,
@@ -62,6 +77,9 @@ export class CreateCatalogue1793263061466 implements MigrationInterface {
       `ALTER TABLE "product_ingredients" DROP CONSTRAINT "FK_0c47e7d54540edb8171ebe4e775"`,
     );
     await queryRunner.query(
+      `ALTER TABLE "product_formats" DROP CONSTRAINT "FK_2651d041151e34243d78f30aefd"`,
+    );
+    await queryRunner.query(
       `DROP INDEX "public"."IDX_f32b228b03d547524204e04ffd"`,
     );
     await queryRunner.query(
@@ -77,6 +95,14 @@ export class CreateCatalogue1793263061466 implements MigrationInterface {
     await queryRunner.query(`DROP TABLE "product_ingredients"`);
     await queryRunner.query(`DROP TABLE "boxes"`);
     await queryRunner.query(`DROP TABLE "products"`);
+    await queryRunner.query(`DROP TYPE "public"."products_moment_enum"`);
+    await queryRunner.query(
+      `DROP TYPE "public"."products_howmuchcaffeine_enum"`,
+    );
+    await queryRunner.query(`DROP TABLE "product_formats"`);
+    await queryRunner.query(
+      `DROP TYPE "public"."product_formats_packaging_enum"`,
+    );
     await queryRunner.query(`DROP TABLE "ingredients"`);
     await queryRunner.query(`DROP TYPE "public"."ingredients_type_enum"`);
   }

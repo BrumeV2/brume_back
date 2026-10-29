@@ -256,6 +256,7 @@ const colorByTeaType: Record<string, string> = {
 };
 
 async function seed() {
+  // eslint-disable-next-line no-process-env -- garde-fou : le seed vide les tables du catalogue
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Seed interdit en production');
   }

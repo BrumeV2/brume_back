@@ -1,4 +1,5 @@
 import { Column, Entity, ManyToOne, Unique } from 'typeorm';
+import type { Relation } from 'typeorm';
 import { BaseEntity } from '../../../common/entities/base.entity';
 import { Packaging } from '../enums/packaging.enum';
 import { Product } from './product.entity';
@@ -11,7 +12,8 @@ export class ProductFormat extends BaseEntity {
     nullable: false,
     onDelete: 'CASCADE',
   })
-  product: Product;
+  // Relation<> : évite la référence circulaire dans les métadonnées en ESM
+  product: Relation<Product>;
 
   @Column({ type: 'enum', enum: Packaging })
   packaging: Packaging;
