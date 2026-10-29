@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import { DataSource } from 'typeorm';
+import { join } from 'node:path';
 import { getDatabaseConfig } from '../config/database.config';
 
-const isCompiled = __filename.endsWith('.js');
 const db = getDatabaseConfig();
 
 export default new DataSource({
@@ -12,10 +12,6 @@ export default new DataSource({
   username: db.user,
   password: db.password,
   database: db.name,
-  entities: [isCompiled ? 'dist/**/*.entity.js' : 'src/**/*.entity.ts'],
-  migrations: [
-    isCompiled
-      ? 'dist/database/migrations/*.js'
-      : 'src/database/migrations/*.ts',
-  ],
+  entities: [join(__dirname, '../**/*.entity{.ts,.js}')],
+  migrations: [join(__dirname, 'migrations/*{.ts,.js}')],
 });

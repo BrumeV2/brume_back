@@ -37,6 +37,7 @@ export default tseslint.config(
     files: [
       'src/config/env.validator.ts',
       'src/config/env.validator.spec.ts',
+      'test/**/*.ts',
     ],
     rules: {
       'no-process-env': 'off',
