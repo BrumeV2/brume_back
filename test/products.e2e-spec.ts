@@ -1,3 +1,9 @@
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { parse } from 'yaml';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import type { OpenAPIObject, SchemaObject } from '@nestjs/swagger';
+import { CatalogueFiltersDto } from '../src/modules/products/dto/catalogue-filters.dto';
 import { INestApplication } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
@@ -33,6 +39,7 @@ interface ValidationError {
 
 describe('Catalogue produits (PostgreSQL + HTTP)', () => {
   let app: INestApplication<App>;
+  let db: DataSource;
   const origin = 'http://localhost:5173';
 
   beforeAll(async () => {
@@ -92,7 +99,8 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
     app = fixture.createNestApplication();
     configureApp(app);
     await app.init();
-    await seedCatalogue(app.get(DataSource));
+    db = app.get(DataSource);
+    await seedCatalogue(db);
   });
 
   afterAll(async () => {
@@ -223,6 +231,268 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
       });
     },
   );
+  async function options(): Promise<CatalogueFiltersDto> {
+    const response = await request(app.getHttpServer())
+      .get('/api/products/filters')
+      .expect(200);
+    return response.body as CatalogueFiltersDto;
+  }
+  const names = (page: CataloguePageDto) =>
+    page.data.map((product) => product.name);
+
+  it('expose seulement les choix liés au catalogue et les bornes des formats', async () => {
+    await db
+      .getRepository(Ingredient)
+      .save({ name: 'Sans produit', type: IngredientType.BASE, price: 100 });
+    const values = await options();
+    expect(values.origin).toEqual(['Inde', 'Japon']);
+    expect(values.typeTea).toEqual(['noir', 'vert']);
+    expect(values.howMuchCaffeine).toEqual(['medium', 'high']);
+    expect(values.moment).toEqual(['morning', 'noon']);
+    expect(values.price).toEqual({ min: 590, max: 1390 });
+    expect(
+      values.ingredients.map((ingredient) => ingredient.name).sort(),
+    ).toEqual(['Bergamote', 'Cannelle', 'Sencha', 'Thé noir']);
+    expect(
+      values.ingredients.every((ingredient) =>
+        /^[a-f0-9-]{36}$/.test(ingredient.id),
+      ),
+    ).toBe(true);
+  });
+  it('combine deux filtres puis permet de retirer une restriction', async () => {
+    expect(names(await getCatalogue('?origin=Inde&maxPrice=600'))).toEqual([
+      'Earl Grey',
+    ]);
+    expect(names(await getCatalogue('?origin=Inde'))).toEqual([
+      'Chaï',
+      'Earl Grey',
+    ]);
+  });
+  it('combine les six filtres, sans retirer les formats et ingrédients retournés', async () => {
+    const ingredient = (await options()).ingredients.find(
+      (item) => item.name === 'Bergamote',
+    )!;
+    const page = await getCatalogue(
+      `?ingredients=${ingredient.id}&origin=Inde&typeTea=noir&howMuchCaffeine=high&moment=morning&minPrice=600&maxPrice=1100`,
+    );
+    expect(names(page)).toEqual(['Earl Grey']);
+    expect(page.meta.total).toBe(1);
+    expect(page.data[0].formats).toHaveLength(3);
+    expect(page.data[0].ingredients).toHaveLength(2);
+    expect(page.data[0].price).toBe(590);
+  });
+  it('applique un OU dans chaque filtre et un ET entre filtres', async () => {
+    expect(
+      names(
+        await getCatalogue(
+          '?origin=Inde&origin=Japon&howMuchCaffeine=medium&howMuchCaffeine=high&moment=noon',
+        ),
+      ),
+    ).toEqual(['Sencha']);
+    expect(names(await getCatalogue('?typeTea=noir&typeTea=vert'))).toEqual([
+      'Chaï',
+      'Earl Grey',
+      'Sencha',
+    ]);
+    expect(
+      names(await getCatalogue('?moment=morning&moment=noon')),
+    ).toHaveLength(3);
+  });
+  it('filtre les ingrédients par UUID sans dupliquer un produit correspondant deux fois', async () => {
+    const ingredients = (await options()).ingredients;
+    const ids = ['Thé noir', 'Bergamote'].map(
+      (name) => ingredients.find((item) => item.name === name)!.id,
+    );
+    const page = await getCatalogue(
+      `?ingredients=${ids[0]}&ingredients=${ids[1]}`,
+    );
+    expect(names(page)).toEqual(['Chaï', 'Earl Grey']);
+    expect(page.meta.total).toBe(2);
+    expect(
+      names(await getCatalogue(`?ingredients=${ids[1].toUpperCase()}`)),
+    ).toEqual(['Earl Grey']);
+  });
+  it('conserve le total filtré et un tri stable entre les pages', async () => {
+    const first = await getCatalogue('?origin=Inde&page=1&limit=1');
+    const second = await getCatalogue('?origin=Inde&page=2&limit=1');
+    expect(names(first)).toEqual(['Chaï']);
+    expect(names(second)).toEqual(['Earl Grey']);
+    expect(first.meta).toEqual({ page: 1, limit: 1, total: 2, totalPages: 2 });
+    const beyond = await getCatalogue('?origin=Inde&page=3&limit=1');
+    expect(beyond.data).toEqual([]);
+    expect(beyond.meta.total).toBe(2);
+  });
+  it('retourne une combinaison vide avec un total à zéro', async () => {
+    const page = await getCatalogue('?origin=Japon&typeTea=noir');
+    expect(page.data).toEqual([]);
+    expect(page.meta).toEqual({ page: 1, limit: 20, total: 0, totalPages: 0 });
+  });
+  it('exige qu’un même format respecte les deux bornes inclusives du prix', async () => {
+    expect(names(await getCatalogue('?minPrice=990&maxPrice=990'))).toEqual([
+      'Earl Grey',
+    ]);
+    expect(names(await getCatalogue('?minPrice=590&maxPrice=590'))).toEqual([
+      'Earl Grey',
+    ]);
+    expect(names(await getCatalogue('?minPrice=700&maxPrice=900'))).toEqual([]);
+    expect(
+      names(await getCatalogue('?minPrice=0&maxPrice=2147483647')),
+    ).toHaveLength(3);
+    expect(names(await getCatalogue('?minPrice=1000'))).toEqual([
+      'Chaï',
+      'Earl Grey',
+    ]);
+    expect(names(await getCatalogue('?maxPrice=0'))).toEqual([]);
+  });
+  it('déduplique et nettoie les sélections répétées', async () => {
+    expect(names(await getCatalogue('?origin=%20Inde%20&origin=Inde'))).toEqual(
+      ['Chaï', 'Earl Grey'],
+    );
+  });
+  it('ne dépend pas de la sélection active pour les choix de filtres', async () => {
+    const before = await options();
+    await getCatalogue('?origin=Japon&moment=noon');
+    expect(await options()).toEqual(before);
+  });
+  it.each([
+    ['howMuchCaffeine=invalid', 'howMuchCaffeine', 'isEnum'],
+    ['howMuchCaffeine=HIGH', 'howMuchCaffeine', 'isEnum'],
+    ['moment=night', 'moment', 'isEnum'],
+    ['ingredients=bergamote', 'ingredients', 'isUuid'],
+    ['origin=', 'origin', 'isNotEmpty'],
+    ['origin=Atlantide', 'origin', 'isAllowed'],
+    ['typeTea=inconnu', 'typeTea', 'isAllowed'],
+    ['minPrice=-1', 'minPrice', 'isInt'],
+    ['minPrice=', 'minPrice', 'isInt'],
+    ['minPrice=1.5', 'minPrice', 'isInt'],
+    ['minPrice=1e3', 'minPrice', 'isInt'],
+    ['minPrice=true', 'minPrice', 'isInt'],
+    ['minPrice=10&minPrice=20', 'minPrice', 'isInt'],
+    ['maxPrice=2147483648', 'maxPrice', 'max'],
+    ['minPrice=1000&maxPrice=500', 'maxPrice', 'priceRange'],
+  ])('refuse le filtre invalide %s', async (query, field, constraint) => {
+    const error = await getValidationError(`?${query}`);
+    expect(error.code).toBe('VALIDATION_ERROR');
+    expect(
+      error.details.some(
+        (detail) =>
+          detail.field === field && detail.constraints.includes(constraint),
+      ),
+    ).toBe(true);
+  });
+  it('refuse un UUID inexistant ou un ingrédient sans produit', async () => {
+    const orphan = await db.getRepository(Ingredient).save({
+      name: 'Sans produit pour validation',
+      type: IngredientType.BASE,
+      price: 100,
+    });
+    for (const id of [randomUUID(), orphan.id]) {
+      const error = await getValidationError(`?ingredients=${id}`);
+      expect(error.details).toContainEqual({
+        field: 'ingredients',
+        constraints: ['isAllowed'],
+      });
+    }
+  });
+  it('refuse une liste trop longue ou un mélange de valeurs autorisées et interdites', async () => {
+    const query = Array.from(
+      { length: 21 },
+      (_, index) => `origin=Origin${index}`,
+    ).join('&');
+    expect(
+      (await getValidationError(`?${query}`)).details.some((detail) =>
+        detail.constraints.includes('arrayMaxSize'),
+      ),
+    ).toBe(true);
+    expect(
+      (await getValidationError('?origin=Inde&origin=Atlantide')).code,
+    ).toBe('VALIDATION_ERROR');
+  });
+  it('ne traite pas une valeur malveillante comme du SQL', async () => {
+    await getValidationError(
+      `?origin=${encodeURIComponent("Inde' OR 1=1 --")}`,
+    );
+    expect((await getCatalogue()).meta.total).toBe(3);
+  });
+  it('accepte les enums valides même si aucun produit ne correspond', async () => {
+    expect(
+      names(await getCatalogue('?howMuchCaffeine=none&moment=evening')),
+    ).toEqual([]);
+  });
+  it('documente les paramètres et les choix dans Swagger et le contrat partagé', () => {
+    const contract = parse(
+      readFileSync('docs/contract/openapi.yaml', 'utf8'),
+    ) as OpenAPIObject;
+    const document = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().build(),
+    );
+    const expected = contract.paths['/products'].get!;
+    const actual = document.paths['/api/products'].get!;
+    const expectedNames = expected
+      .parameters!.map((parameter) =>
+        '$ref' in parameter
+          ? parameter.$ref.split('/').pop()!.toLowerCase()
+          : parameter.name,
+      )
+      .sort();
+    expect(
+      actual
+        .parameters!.map((parameter) =>
+          'name' in parameter ? parameter.name : '',
+        )
+        .sort(),
+    ).toEqual(expectedNames);
+    expect(Object.keys(actual.responses).sort()).toEqual(
+      Object.keys(expected.responses).sort(),
+    );
+    for (const name of ['minPrice', 'maxPrice', 'page', 'limit']) {
+      const parameter = actual.parameters!.find(
+        (item) => 'name' in item && item.name === name,
+      )!;
+      expect(
+        'schema' in parameter ? parameter.schema : undefined,
+      ).toMatchObject({ type: 'integer' });
+    }
+    const expectedPage = contract.components!.schemas!
+      .CatalogueProduct as SchemaObject;
+    const actualPage = document.components!.schemas!
+      .CatalogueProductDto as SchemaObject;
+    expect(actualPage.required?.sort()).toEqual(expectedPage.required?.sort());
+    expect(Object.keys(actualPage.properties!).sort()).toEqual(
+      Object.keys(expectedPage.properties!).sort(),
+    );
+
+    expect(
+      document.paths['/api/products/filters'].get!.responses['200'],
+    ).toBeDefined();
+    const schema = document.components!.schemas!
+      .CatalogueFiltersDto as SchemaObject;
+    expect(Object.keys(schema.properties!).sort()).toEqual(
+      Object.keys(
+        (contract.components!.schemas!.CatalogueFilters as SchemaObject)
+          .properties!,
+      ).sort(),
+    );
+  });
+  it('retourne des choix vides et des prix nuls pour un catalogue vide', async () => {
+    try {
+      await db.query(
+        'TRUNCATE "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
+      );
+      expect(await options()).toEqual({
+        ingredients: [],
+        origin: [],
+        typeTea: [],
+        howMuchCaffeine: [],
+        moment: [],
+        price: { min: null, max: null },
+      });
+      expect((await getCatalogue()).data).toEqual([]);
+    } finally {
+      await seedCatalogue(db);
+    }
+  });
 });
 
 async function seedCatalogue(dataSource: DataSource): Promise<void> {

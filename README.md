@@ -191,7 +191,8 @@ src/
 
 - [x] Initialisation NestJS, Docker Compose, TypeORM et healthcheck
 - [ ] Catalogue, fiche produit, catégories, stock
-- [ ] Recherche par nom et filtres
+- [x] Filtres catalogue US-016 : ingrédients, origine, type de thé, caféine, moment et prix ([documentation](docs/CATALOGUE-FILTERS.md))
+- [ ] Recherche par nom
 - [ ] Panier : ajout, quantité, suppression, total
 - [ ] Checkout : adresse, mode de livraison, récapitulatif
 - [ ] Commande et confirmation

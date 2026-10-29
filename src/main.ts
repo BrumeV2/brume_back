@@ -16,7 +16,7 @@ async function bootstrap() {
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Brume API')
     .setDescription('API e-commerce Brume : thé, café et CBD')
-    .setVersion('1.1.0')
+    .setVersion('1.2.0')
     .addCookieAuth(
       'brume_session',
       { type: 'apiKey', in: 'cookie' },
