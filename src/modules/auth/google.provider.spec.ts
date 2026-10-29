@@ -14,6 +14,17 @@ import type {
 import { AuthConfig } from './auth.config';
 import { GoogleOidcProvider } from './google.provider';
 
+// Unit fixtures must not inherit credentials or cookie settings from Docker/.env.
+function isolatedConfig(values: Record<string, string | undefined> = {}) {
+  const config = new ConfigService(values);
+  jest
+    .spyOn(config, 'get')
+    .mockImplementation(
+      (key: string, fallback?: unknown) => values[key] ?? fallback,
+    );
+  return config;
+}
+
 describe('GoogleOidcProvider (real JWT verification, mocked Google network)', () => {
   const clientId = 'brume-test.apps.googleusercontent.com';
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -70,7 +81,7 @@ describe('GoogleOidcProvider (real JWT verification, mocked Google network)', ()
     );
     provider = new GoogleOidcProvider(
       new AuthConfig(
-        new ConfigService({
+        isolatedConfig({
           GOOGLE_CLIENT_ID: clientId,
           GOOGLE_CLIENT_SECRET: 'test-only',
         }),
@@ -170,7 +181,7 @@ describe('GoogleOidcProvider (real JWT verification, mocked Google network)', ()
 
   it('fails closed when Google has not been configured', () => {
     const unconfigured = new GoogleOidcProvider(
-      new AuthConfig(new ConfigService({})),
+      new AuthConfig(isolatedConfig({})),
     );
     expect(() =>
       unconfigured.authorizationUrl('state', 'nonce', 'verifier'),

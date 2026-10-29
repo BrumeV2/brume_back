@@ -1,9 +1,21 @@
+import { jest } from '@jest/globals';
 import { ConfigService } from '@nestjs/config';
 import { AuthConfig } from './auth.config';
 
+// Unit fixtures must not inherit credentials or cookie settings from Docker/.env.
+function isolatedConfig(values: Record<string, string | undefined> = {}) {
+  const config = new ConfigService(values);
+  jest
+    .spyOn(config, 'get')
+    .mockImplementation(
+      (key: string, fallback?: unknown) => values[key] ?? fallback,
+    );
+  return config;
+}
+
 describe('AuthConfig', () => {
   it('allows localhost development without Google credentials', () => {
-    expect(new AuthConfig(new ConfigService({})).secure).toBe(false);
+    expect(new AuthConfig(isolatedConfig({})).secure).toBe(false);
   });
 
   it.each([
@@ -22,12 +34,12 @@ describe('AuthConfig', () => {
     },
     { GOOGLE_REDIRECT_URI: 'http://api.example/api/auth/google/callback' },
   ])('rejects unsafe configuration %j', (values) => {
-    expect(() => new AuthConfig(new ConfigService(values))).toThrow();
+    expect(() => new AuthConfig(isolatedConfig(values))).toThrow();
   });
 
   it('accepts an HTTPS production configuration', () => {
     const config = new AuthConfig(
-      new ConfigService({
+      isolatedConfig({
         NODE_ENV: 'production',
         GOOGLE_CLIENT_ID: 'test',
         GOOGLE_CLIENT_SECRET: 'test',
