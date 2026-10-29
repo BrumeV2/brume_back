@@ -129,6 +129,10 @@ docker compose exec api npm run migration:create -- src/database/migrations/Seed
 docker compose exec api npm run migration:run      # appliquer
 docker compose exec api npm run migration:revert   # annuler la dernière
 docker compose exec api npm run migration:show     # voir l'état
+
+# En production (code compilé dist/)
+npm run migration:run:prod
+npm run migration:show:prod
 ```
 
 ### Développement

@@ -4,6 +4,7 @@ services:
       context: .
       target: dev
     container_name: brume-api
+    restart: "no"
     env_file: .env
     environment:
       DB_HOST: postgres          # dans Docker, on joint la base par son nom de service
@@ -19,7 +20,7 @@ services:
   postgres:
     image: postgres:17-alpine
     container_name: brume-postgres
-    restart: unless-stopped
+    restart: "no"
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
@@ -37,7 +38,7 @@ services:
   pgadmin:
     image: dpage/pgadmin4
     container_name: brume-pgadmin
-    restart: unless-stopped
+    restart: "no"
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@brume.dev
       PGADMIN_DEFAULT_PASSWORD: admin
