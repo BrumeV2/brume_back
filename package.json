@@ -25,7 +25,8 @@
     "migration:revert": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:revert",
     "migration:show": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:show",
     "migration:run:prod": "node node_modules/typeorm/cli.js -d dist/database/data-source.js migration:run",
-    "migration:show:prod": "node node_modules/typeorm/cli.js -d dist/database/data-source.js migration:show"
+    "migration:show:prod": "node node_modules/typeorm/cli.js -d dist/database/data-source.js migration:show",
+    "seed": "ts-node src/database/seeds/catalogue.seed.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
