@@ -43,8 +43,25 @@ jobs:
       - name: Verification ESLint
         run: npm run lint
 
-      - name: Execution des tests unitaires
-        run: npm run test
+      - name: Execution des tests avec couverture de code
+        run: |
+          npm run test:cov 2>&1 | tee coverage.log
+
+      - name: Publier le resume de couverture dans le recapitulatif du workflow
+        if: always()
+        run: |
+          echo "### Rapport de couverture de code (Jest)" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          sed -n '/---*|---*/,/---*|---*/p' coverage.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Sauvegarder le rapport de couverture (HTML & LCOV)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-coverage-report-back
+          path: coverage/
+          retention-days: 14
 
       - name: Verification du build
         run: npm run build
