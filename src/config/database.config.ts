@@ -1,5 +1,5 @@
 import { registerAs } from '@nestjs/config';
-import { getRequiredEnv, getRequiredEnvNumber } from './env.validator';
+import { getRequiredEnv, getRequiredEnvNumber } from './config';
 
 export interface DatabaseConfig {
   host: string;

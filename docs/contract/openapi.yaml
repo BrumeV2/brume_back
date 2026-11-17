@@ -119,6 +119,9 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '503': { $ref: '#/components/responses/AuthUnavailable' }
     patch:
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
+        - { name: X-CSRF-Protection, in: header, required: true, schema: { type: string, enum: ['1'] } }
       tags: [users]
       operationId: updateMe
       summary: Modifier mon profil (US-047)
@@ -135,88 +138,8 @@ paths:
               schema: { $ref: '#/components/schemas/User' }
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
-
-  /users/me/addresses:
-    get:
-      tags: [users]
-      operationId: listMyAddresses
-      summary: Mes adresses (US-048, P1)
-      responses:
-        '200':
-          description: Liste
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/Address' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '503': { $ref: '#/components/responses/AuthUnavailable' }
-    post:
-      parameters:
-        - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
-        - { name: X-CSRF-Protection, in: header, required: true, schema: { type: string, enum: ['1'] } }
-      tags: [users]
-      operationId: createMyAddress
-      summary: Ajouter une adresse (US-048, P1)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/AddressInput' }
-      responses:
-        '201':
-          description: Créée
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Address' }
-        '400': { $ref: '#/components/responses/ValidationError' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '503': { $ref: '#/components/responses/AuthUnavailable' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ShippingZoneNotServed' }
-
-  /users/me/addresses/{id}:
-    parameters:
-      - $ref: '#/components/parameters/IdPath'
-    patch:
-      parameters:
-        - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
-        - { name: X-CSRF-Protection, in: header, required: true, schema: { type: string, enum: ['1'] } }
-      tags: [users]
-      operationId: updateMyAddress
-      summary: Modifier partiellement une adresse (US-048)
-      description: Au moins un champ. isDefault=true remplace atomiquement le défaut précédent. Une adresse non possédée retourne 404.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/UpdateAddressInput' }
-      responses:
-        '200':
-          description: Modifiée
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Address' }
-        '400': { $ref: '#/components/responses/ValidationError' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
         '503': { $ref: '#/components/responses/AuthUnavailable' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ShippingZoneNotServed' }
-    delete:
-      parameters:
-        - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
-        - { name: X-CSRF-Protection, in: header, required: true, schema: { type: string, enum: ['1'] } }
-      tags: [users]
-      operationId: deleteMyAddress
-      summary: Supprimer une adresse (US-048, P1)
-      responses:
-        '204': { description: Supprimée }
-        '400': { $ref: '#/components/responses/ValidationError' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '503': { $ref: '#/components/responses/AuthUnavailable' }
-        '404': { $ref: '#/components/responses/NotFound' }
 
   # ───────────────────────────── CATALOG ─────────────────────────────
   /categories:
@@ -1106,13 +1029,19 @@ components:
       enum: [CUSTOMER, ADMIN]
     User:
       type: object
-      required: [id, email, firstName, lastName, phone, role, status, emailVerifiedAt, createdAt, updatedAt]
+      required: [id, userId, email, firstName, lastName, phone, address, postalCode, city, loyaltyPoints, doNewsletter, role, status, emailVerifiedAt, createdAt, updatedAt]
       properties:
-        id: { type: string, format: uuid, example: e0000000-0000-4000-8000-000000000001 }
+        id: { type: string, format: uuid, description: Identifiant du profil, example: e0000000-0000-4000-8000-000000000001 }
+        userId: { type: string, format: uuid, description: Identifiant du compte utilisateur, example: e0000000-0000-4000-8000-000000000002 }
         email: { type: string, format: email, example: camille.martin@example.com }
         firstName: { type: string, nullable: true, example: Camille }
         lastName: { type: string, nullable: true, example: Martin }
         phone: { type: string, nullable: true, example: '0612345678' }
+        address: { type: string, nullable: true, example: 12 rue des Lilas }
+        postalCode: { type: string, nullable: true, example: '69003' }
+        city: { type: string, nullable: true, example: Lyon }
+        loyaltyPoints: { type: integer, example: 0, description: Points de fidélité }
+        doNewsletter: { type: boolean, example: false, description: Inscription newsletter }
         role: { $ref: '#/components/schemas/Role' }
         status: { type: string, enum: [ACTIVE, BLOCKED] }
         emailVerifiedAt: { type: string, format: date-time }
@@ -1120,11 +1049,16 @@ components:
         updatedAt: { type: string, format: date-time }
     UpdateProfileRequest:
       type: object
+      additionalProperties: false
       minProperties: 1
       properties:
         firstName: { type: string, minLength: 1, maxLength: 100 }
         lastName: { type: string, minLength: 1, maxLength: 100 }
         phone: { type: string, nullable: true, pattern: '^0[1-9]\d{8}$' }
+        address: { type: string, nullable: true, maxLength: 255 }
+        postalCode: { type: string, nullable: true, pattern: '^\d{5}$' }
+        city: { type: string, nullable: true, minLength: 1, maxLength: 100 }
+        doNewsletter: { type: boolean }
 
     ShippingAddress:
       type: object

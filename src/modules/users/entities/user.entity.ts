@@ -1,5 +1,6 @@
-import { Column, Entity } from 'typeorm';
+import { Column, Entity, OneToOne } from 'typeorm';
 import { BaseEntity } from '../../../common/entities/base.entity';
+import type { Profile } from './profile.entity';
 
 export enum Role {
   CUSTOMER = 'CUSTOMER',
@@ -25,15 +26,6 @@ export class User extends BaseEntity {
   @Column({ type: 'varchar', length: 254, unique: true })
   email!: string;
 
-  @Column({ name: 'prenom', type: 'varchar', length: 100, nullable: true })
-  firstName!: string | null;
-
-  @Column({ name: 'nom', type: 'varchar', length: 100, nullable: true })
-  lastName!: string | null;
-
-  @Column({ name: 'telephone', type: 'varchar', length: 30, nullable: true })
-  phone!: string | null;
-
   @Column({
     type: 'enum',
     enum: Role,
@@ -53,4 +45,7 @@ export class User extends BaseEntity {
 
   @Column({ name: 'email_verifie_at', type: 'timestamptz' })
   emailVerifiedAt!: Date;
+
+  @OneToOne('Profile', 'user')
+  profile?: Profile;
 }

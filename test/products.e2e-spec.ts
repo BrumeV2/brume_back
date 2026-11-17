@@ -7,8 +7,8 @@ import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { configureApp } from '../src/app.setup';
 import { CreateGoogleAccountsAndSessions1793109589589 } from '../src/database/migrations/1793109589589-CreateGoogleAccountsAndSessions';
-import { CreateAddresses1793261709905 } from '../src/database/migrations/1793261709905-CreateAddresses';
 import { CreateCatalogue1793272229451 } from '../src/database/migrations/1793272229451-CreateCatalogue';
+import { ReplaceAddressesWithProfiles1793280000000 } from '../src/database/migrations/1793280000000-ReplaceAddressesWithProfiles';
 import { AuthModule } from '../src/modules/auth/auth.module';
 import { AuthRateLimit } from '../src/modules/auth/entities/auth-rate-limit.entity';
 import { OAuthTransaction } from '../src/modules/auth/entities/oauth-transaction.entity';
@@ -23,7 +23,7 @@ import { ConsumptionMoment } from '../src/modules/products/enums/consumption-mom
 import { IngredientType } from '../src/modules/products/enums/ingredient-type.enum';
 import { Packaging } from '../src/modules/products/enums/packaging.enum';
 import { ProductsModule } from '../src/modules/products/products.module';
-import { Address } from '../src/modules/users/entities/address.entity';
+import { Profile } from '../src/modules/users/entities/profile.entity';
 import { User } from '../src/modules/users/entities/user.entity';
 
 interface ValidationError {
@@ -69,7 +69,7 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
             Session,
             OAuthTransaction,
             AuthRateLimit,
-            Address,
+            Profile,
             Product,
             ProductFormat,
             Ingredient,
@@ -77,8 +77,8 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
           ],
           migrations: [
             CreateGoogleAccountsAndSessions1793109589589,
-            CreateAddresses1793261709905,
             CreateCatalogue1793272229451,
+            ReplaceAddressesWithProfiles1793280000000,
           ],
           migrationsRun: true,
           synchronize: false,
