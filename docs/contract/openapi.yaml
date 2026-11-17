@@ -1246,17 +1246,15 @@ components:
         stock: { type: integer }
     CatalogueProduct:
       type: object
-      required: [id, name, typeTea, origin, ingredients, price, moment, image, formats]
+      required: [id, name, typeTea, origin, ingredients, moment, image]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         typeTea: { type: string, nullable: true }
         origin: { type: string, nullable: true }
         ingredients: { type: array, items: { type: string } }
-        price: { type: integer, description: Prix du format le moins cher, en centimes, même si un autre format satisfait le filtre de prix }
         moment: { type: string, enum: [morning, noon, snack, evening] }
         image: { type: string, nullable: true, description: Image encodée en base64 }
-        formats: { type: array, items: { $ref: '#/components/schemas/CatalogueFormat' } }
     CataloguePage:
       type: object
       required: [data, meta]
