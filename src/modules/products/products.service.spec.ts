@@ -29,14 +29,32 @@ function buildProduct(overrides: Partial<Product> = {}): Product {
 
 describe('ProductsService', () => {
   let service: ProductsService;
+  const builder = {
+    select: jest.fn(),
+    andWhere: jest.fn(),
+    orderBy: jest.fn(),
+    addOrderBy: jest.fn(),
+    skip: jest.fn(),
+    take: jest.fn(),
+    getManyAndCount: jest.fn<() => Promise<[Partial<Product>[], number]>>(),
+  };
   const repository = {
-    findAndCount:
-      jest.fn<(options?: unknown) => Promise<[Partial<Product>[], number]>>(),
+    createQueryBuilder: jest.fn(),
     find: jest.fn<(options?: unknown) => Promise<Product[]>>(),
   };
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    repository.createQueryBuilder.mockReturnValue(builder);
+    for (const method of [
+      'select',
+      'andWhere',
+      'orderBy',
+      'addOrderBy',
+      'skip',
+      'take',
+    ] as const)
+      builder[method].mockReturnValue(builder);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -50,18 +68,17 @@ describe('ProductsService', () => {
 
   describe('findCatalogue', () => {
     it('pagine sur les produits avec skip/take calculés depuis page et limit', async () => {
-      repository.findAndCount.mockResolvedValue([[], 0]);
+      builder.getManyAndCount.mockResolvedValue([[], 0]);
       repository.find.mockResolvedValue([]);
 
       await service.findCatalogue({ page: 3, limit: 10 });
 
-      expect(repository.findAndCount).toHaveBeenCalledWith(
-        expect.objectContaining({ skip: 20, take: 10 }),
-      );
+      expect(builder.skip).toHaveBeenCalledWith(20);
+      expect(builder.take).toHaveBeenCalledWith(10);
     });
 
     it('charge les relations uniquement pour les produits de la page', async () => {
-      repository.findAndCount.mockResolvedValue([
+      builder.getManyAndCount.mockResolvedValue([
         [{ id: 'a' }, { id: 'b' }],
         2,
       ]);
@@ -93,7 +110,7 @@ describe('ProductsService', () => {
           },
         ] as Product['formats'],
       });
-      repository.findAndCount.mockResolvedValue([[{ id: product.id }], 1]);
+      builder.getManyAndCount.mockResolvedValue([[{ id: product.id }], 1]);
       repository.find.mockResolvedValue([product]);
 
       const result = await service.findCatalogue({ page: 1, limit: 20 });
@@ -154,7 +171,7 @@ describe('ProductsService', () => {
           },
         ] as Product['formats'],
       });
-      repository.findAndCount.mockResolvedValue([[{ id: product.id }], 1]);
+      builder.getManyAndCount.mockResolvedValue([[{ id: product.id }], 1]);
       repository.find.mockResolvedValue([product]);
 
       const result = await service.findCatalogue({ page: 1, limit: 20 });
@@ -169,7 +186,7 @@ describe('ProductsService', () => {
     });
 
     it('calcule les métadonnées de pagination à partir du total', async () => {
-      repository.findAndCount.mockResolvedValue([[], 21]);
+      builder.getManyAndCount.mockResolvedValue([[], 21]);
       repository.find.mockResolvedValue([]);
 
       const result = await service.findCatalogue({ page: 2, limit: 10 });
@@ -183,7 +200,7 @@ describe('ProductsService', () => {
     });
 
     it('renvoie une page vide sans erreur au-delà de la dernière page', async () => {
-      repository.findAndCount.mockResolvedValue([[], 8]);
+      builder.getManyAndCount.mockResolvedValue([[], 8]);
       repository.find.mockResolvedValue([]);
 
       const result = await service.findCatalogue({ page: 5, limit: 20 });

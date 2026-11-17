@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Brume API
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Contrat d'API du MVP Brume (thé, café, CBD) — T-003.
 
@@ -21,6 +21,7 @@ tags:
   - name: auth
   - name: users
   - name: catalog
+  - name: products
   - name: cart
   - name: checkout
   - name: orders
@@ -236,48 +237,93 @@ paths:
 
   /products:
     get:
-      tags: [catalog]
+      tags: [products]
       operationId: listProducts
-      summary: Catalogue, recherche, filtres et tri (US-001, 014, 016, 017)
-      description: Les produits archivés sont exclus.
+      summary: Catalogue paginé avec filtres combinés (US-016)
+      description: ET entre filtres, OU entre valeurs d'un filtre. Prix appliqué à un format existant, pas au seul prix minimum affiché. Tous les formats du produit restent retournés. Tri stable par nom puis UUID. Les valeurs origin, typeTea et ingredients doivent être présentes dans le catalogue complet.
       security: []
       parameters:
-        - name: q
+        - name: ingredients
           in: query
-          description: Recherche plein texte sur le nom (US-014)
-          schema: { type: string, maxLength: 100 }
-        - name: category
-          in: query
-          description: Slug de catégorie (inclut les sous-catégories)
-          schema: { type: string }
-        - name: type
-          in: query
-          schema: { $ref: '#/components/schemas/ProductType' }
-        - name: minPriceCents
-          in: query
-          schema: { type: integer, minimum: 0 }
-        - name: maxPriceCents
-          in: query
-          schema: { type: integer, minimum: 0 }
-        - name: inStock
-          in: query
-          description: '`true` = uniquement les produits dont au moins une variante est disponible'
-          schema: { type: boolean }
-        - name: sort
-          in: query
+          description: 'Identifiants des ingrédients liés au catalogue. Répéter le paramètre pour plusieurs valeurs (OU).'
+          style: form
+          explode: true
           schema:
-            type: string
-            enum: [relevance, price_asc, price_desc, newest, name_asc]
-            default: relevance
+            type: array
+            minItems: 1
+            maxItems: 20
+            items: { type: string, format: uuid }
+        - name: origin
+          in: query
+          description: 'Origines exactes présentes dans le catalogue. Répéter le paramètre pour plusieurs valeurs (OU).'
+          style: form
+          explode: true
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 20
+            items: { type: string, minLength: 1 }
+        - name: typeTea
+          in: query
+          description: 'Types de thé exacts présents dans le catalogue. Répéter le paramètre pour plusieurs valeurs (OU).'
+          style: form
+          explode: true
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 20
+            items: { type: string, minLength: 1 }
+        - name: howMuchCaffeine
+          in: query
+          description: 'Niveaux de caféine. Répéter le paramètre pour plusieurs valeurs (OU).'
+          style: form
+          explode: true
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 20
+            items: { type: string, enum: [none, low, medium, high] }
+        - name: moment
+          in: query
+          description: 'Moments de consommation. Répéter le paramètre pour plusieurs valeurs (OU).'
+          style: form
+          explode: true
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 20
+            items: { type: string, enum: [morning, noon, snack, evening] }
+        - name: minPrice
+          in: query
+          description: Prix inclus en centimes, sur un même format. minPrice doit être inférieur ou égal à maxPrice.
+          schema: { type: integer, minimum: 0, maximum: 2147483647 }
+        - name: maxPrice
+          in: query
+          description: Prix inclus en centimes, sur un même format. minPrice doit être inférieur ou égal à maxPrice.
+          schema: { type: integer, minimum: 0, maximum: 2147483647 }
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
-          description: Page de produits
+          description: "Produits correspondants et total après filtrage. Combinaison vide ou page dépassée : liste vide."
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ProductSummaryPage' }
+              schema: { $ref: '#/components/schemas/CataloguePage' }
         '400': { $ref: '#/components/responses/ValidationError' }
+
+  /products/filters:
+    get:
+      tags: [products]
+      operationId: getCatalogueFilters
+      summary: Choix de filtres présents dans le catalogue complet
+      description: "Public, sans paramètres. Les choix ne dépendent pas des filtres actifs. Seuls les ingrédients liés à un produit sont proposés. Catalogue vide : listes vides et bornes de prix nulles."
+      security: []
+      responses:
+        '200':
+          description: Choix disponibles et bornes de prix en centimes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogueFilters' }
 
   /products/{slug}:
     get:
@@ -1188,6 +1234,64 @@ components:
         id: { type: string, format: uuid }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    CatalogueFormat:
+      type: object
+      required: [id, packaging, quantity, price, stock]
+      properties:
+        id: { type: string, format: uuid }
+        packaging: { type: string, enum: [bag, box, tin] }
+        quantity: { type: integer, description: Grammage }
+        price: { type: integer, description: Centimes }
+        stock: { type: integer }
+    CatalogueProduct:
+      type: object
+      required: [id, name, typeTea, origin, ingredients, price, moment, image, formats]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        typeTea: { type: string, nullable: true }
+        origin: { type: string, nullable: true }
+        ingredients: { type: array, items: { type: string } }
+        price: { type: integer, description: Prix du format le moins cher, en centimes, même si un autre format satisfait le filtre de prix }
+        moment: { type: string, enum: [morning, noon, snack, evening] }
+        image: { type: string, nullable: true, description: Image encodée en base64 }
+        formats: { type: array, items: { $ref: '#/components/schemas/CatalogueFormat' } }
+    CataloguePage:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/CatalogueProduct' } }
+        meta:
+          type: object
+          required: [page, limit, total, totalPages]
+          properties:
+            page: { type: integer }
+            limit: { type: integer }
+            total: { type: integer }
+            totalPages: { type: integer }
+    CatalogueFilters:
+      type: object
+      required: [ingredients, origin, typeTea, howMuchCaffeine, moment, price]
+      properties:
+        ingredients:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+        origin: { type: array, items: { type: string } }
+        typeTea: { type: array, items: { type: string } }
+        howMuchCaffeine: { type: array, items: { type: string, enum: [none, low, medium, high] } }
+        moment: { type: array, items: { type: string, enum: [morning, noon, snack, evening] } }
+        price:
+          type: object
+          required: [min, max]
+          properties:
+            min: { type: integer, nullable: true }
+            max: { type: integer, nullable: true }
 
     # ── catalogue ──
     ProductType:
