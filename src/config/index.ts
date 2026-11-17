@@ -3,20 +3,28 @@ import databaseConfig, {
   getDatabaseConfig,
   DatabaseConfig,
 } from './database.config';
+import { AuthConfig } from './auth.config';
 import {
   getRequiredEnv,
   getRequiredEnvNumber,
+  getRequiredEnvBoolean,
+  parseAbsoluteUrl,
+  parseCorsOrigins,
   MissingEnvException,
   InvalidEnvException,
-} from './env.validator';
+} from './config';
 
 export {
   appConfig,
   getAppConfig,
   databaseConfig,
   getDatabaseConfig,
+  AuthConfig,
   getRequiredEnv,
   getRequiredEnvNumber,
+  getRequiredEnvBoolean,
+  parseAbsoluteUrl,
+  parseCorsOrigins,
   MissingEnvException,
   InvalidEnvException,
 };

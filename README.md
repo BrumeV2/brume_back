@@ -177,9 +177,11 @@ src/
 
 ## 🌿 Workflow Git
 
-- Branche principale : `main`
-- Branches de travail : `feature/<CLÉ-JIRA>-description-courte`, par exemple `feature/BRUME-42-catalogue-produits`
-- La **clé Jira** doit apparaître dans le nom de la branche, dans les commits et dans la PR.
+- Branches de référence :
+  - `main` : code en production
+  - `develop` : branche d'intégration active
+- Branches de travail : `feat/<CLÉ-EPIC>/<CLÉ-TÂCHE>-description-courte` ou `fix/<CLÉ-EPIC>/<CLÉ-TÂCHE>-description-courte`, par exemple `feat/scrum-97/scrum-254-modifier-profil`
+- La **clé Jira** de la story et de la sous-tâche doivent apparaître dans le nom de la branche, dans les commits et dans la PR.
 - Organisation du backlog Jira : Epic → Story `[US-0XX]` → Sub-tasks `[BACK]` / `[FRONT]`
 - Priorités : **P0** = MVP · **P1** = V1 · **P2** = V2 · **P3** = plus tard
 

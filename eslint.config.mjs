@@ -35,8 +35,8 @@ export default tseslint.config(
   },
   {
     files: [
-      'src/config/env.validator.ts',
-      'src/config/env.validator.spec.ts',
+      'src/config/config.ts',
+      'src/config/config.spec.ts',
       'test/**/*.ts',
     ],
     rules: {

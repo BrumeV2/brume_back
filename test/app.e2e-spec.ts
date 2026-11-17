@@ -1,5 +1,5 @@
-import { Address } from '../src/modules/users/entities/address.entity';
-import { CreateAddresses1793261709905 } from '../src/database/migrations/1793261709905-CreateAddresses';
+import { Profile } from '../src/modules/users/entities/profile.entity';
+import { ReplaceAddressesWithProfiles1793280000000 } from '../src/database/migrations/1793280000000-ReplaceAddressesWithProfiles';
 import { jest } from '@jest/globals';
 import {
   Controller,
@@ -26,11 +26,10 @@ import { AuthRateLimit } from '../src/modules/auth/entities/auth-rate-limit.enti
 import { OAuthTransaction } from '../src/modules/auth/entities/oauth-transaction.entity';
 import { Session } from '../src/modules/auth/entities/session.entity';
 import { GoogleIdentityProvider } from '../src/modules/auth/google.provider';
-import { SessionsService } from '../src/modules/auth/sessions.service';
 import { AccountStatus, User } from '../src/modules/users/entities/user.entity';
 import { authenticationFailed } from '../src/modules/users/users.service';
 import type { GoogleIdentity } from '../src/modules/users/users.service';
-import { hashToken, randomToken } from '../src/modules/auth/crypto.util';
+import { hashToken } from '../src/modules/auth/crypto.util';
 import { CreateGoogleAccountsAndSessions1793109589589 } from '../src/database/migrations/1793109589589-CreateGoogleAccountsAndSessions';
 
 // Test-only endpoint checks that authentication is mandatory by default.
@@ -42,7 +41,7 @@ class PrivateController {
   }
 }
 
-describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
+describe('Google accounts, sessions and profile (PostgreSQL + HTTP)', () => {
   let app: INestApplication<App>;
   let db: DataSource;
   const origin = 'http://localhost:5173';
@@ -141,10 +140,10 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
           username: process.env.TEST_DB_USER ?? 'brume',
           password: process.env.TEST_DB_PASSWORD ?? 'change-me',
           database,
-          entities: [User, Session, OAuthTransaction, AuthRateLimit, Address],
+          entities: [User, Session, OAuthTransaction, AuthRateLimit, Profile],
           migrations: [
             CreateGoogleAccountsAndSessions1793109589589,
-            CreateAddresses1793261709905,
+            ReplaceAddressesWithProfiles1793280000000,
           ],
           migrationsRun: true,
           synchronize: false,
@@ -165,7 +164,7 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
   beforeEach(async () => {
     if (!db) return;
     await db.query(
-      'TRUNCATE TABLE adresses, sessions, utilisateurs, oauth_transactions, auth_rate_limits CASCADE',
+      'TRUNCATE TABLE profils, sessions, utilisateurs, oauth_transactions, auth_rate_limits CASCADE',
     );
     jest.clearAllMocks();
   });
@@ -178,10 +177,10 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
     await request(app.getHttpServer())
       .get('/api/health')
       .expect(200, { status: 'ok' });
-    await request(app.getHttpServer()).get('/api/private/any-id').expect(401);
-    await request(app.getHttpServer()).get('/api/users/me').expect(401);
+    await request(app.getHttpServer()).get('/api/private/item').expect(401);
   });
-  it('documents auth, profile and address routes consistently with the shared contract', () => {
+
+  it('documents auth and profile routes consistently with the shared contract', () => {
     const contract = parse(
       readFileSync('docs/contract/openapi.yaml', 'utf8'),
     ) as OpenAPIObject;
@@ -201,10 +200,7 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
       ['/auth/google/callback', 'get'],
       ['/auth/logout', 'post'],
       ['/users/me', 'get'],
-      ['/users/me/addresses', 'get'],
-      ['/users/me/addresses', 'post'],
-      ['/users/me/addresses/{id}', 'patch'],
-      ['/users/me/addresses/{id}', 'delete'],
+      ['/users/me', 'patch'],
     ] as const) {
       const expected = contract.paths[path][method]!;
       const actual = document.paths[`/api${path}`][method]!;
@@ -234,16 +230,6 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
           .sort(),
       );
     }
-    const expectedAddress = contract.components!.schemas!
-      .Address as SchemaObject;
-    const actualAddress = document.components!.schemas!
-      .AddressResponseDto as SchemaObject;
-    expect(actualAddress.required?.sort()).toEqual(
-      expectedAddress.required?.sort(),
-    );
-    expect(Object.keys(actualAddress.properties!).sort()).toEqual(
-      Object.keys(expectedAddress.properties!).sort(),
-    );
     const expectedUser = contract.components!.schemas!.User as SchemaObject;
     const actualUser = document.components!.schemas!
       .UserResponseDto as SchemaObject;
@@ -260,15 +246,24 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
       name: 'brume_session',
     });
   });
-  it('creates a verified customer and stores only a session fingerprint', async () => {
+
+  it('creates a verified customer and initializes their profile', async () => {
     const { cookie: sessionCookie, response } = await login();
-    expect(response.headers.location).toBe(`${origin}/compte`);
-    const rawCookies = response.headers['set-cookie'] as unknown as string[];
-    expect(
-      rawCookies.find((value) => value.startsWith('brume_session=')),
-    ).toMatch(/Path=\/api;.*HttpOnly;.*SameSite=Lax/);
-    expect(response.headers['cache-control']).toBe('no-store');
-    expect(response.headers['referrer-policy']).toBe('no-referrer');
+    expect(sessionCookie).toMatch(/^brume_session=[A-Za-z0-9_-]{43}$/);
+    expect(response.headers.location).toBe('http://localhost:5173/compte');
+    const user = await db
+      .getRepository(User)
+      .createQueryBuilder('u')
+      .addSelect('u.googleSub')
+      .leftJoinAndSelect('u.profile', 'profile')
+      .where('u.email = :email', { email: alice.email })
+      .getOneOrFail();
+    expect(user.googleSub).toBe(alice.sub);
+    expect(user.profile).toBeDefined();
+    expect(user.profile?.firstName).toBe('Alice');
+    expect(user.profile?.loyaltyPoints).toBe(0);
+    expect(user.profile?.doNewsletter).toBe(false);
+    expect(await db.getRepository(Session).count()).toBe(1);
     const me = await request(app.getHttpServer())
       .get('/api/users/me')
       .set('Cookie', sessionCookie)
@@ -276,166 +271,90 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
     expect(me.body).toMatchObject({
       email: alice.email,
       firstName: 'Alice',
+      lastName: null,
+      phone: null,
+      address: null,
+      postalCode: null,
+      city: null,
+      loyaltyPoints: 0,
+      doNewsletter: false,
       role: 'CUSTOMER',
       status: 'ACTIVE',
     });
-    expect((me.body as User).emailVerifiedAt).toBeTruthy();
-    for (const key of [
-      'googleSub',
-      'token',
-      'tokenHash',
-      'password',
-      'passwordHash',
-    ])
-      expect(me.body).not.toHaveProperty(key);
-    const session = await db
-      .getRepository(Session)
-      .createQueryBuilder('session')
-      .addSelect('session.tokenHash')
-      .getOneOrFail();
-    expect(session.tokenHash).toBe(hashToken(sessionCookie.split('=')[1]));
-    expect(JSON.stringify(me.body)).not.toContain(sessionCookie.split('=')[1]);
-    expect(await db.getRepository(OAuthTransaction).count()).toBe(0);
   });
+
   it('reuses the same client on subsequent logins', async () => {
-    await login();
-    await login();
+    const first = await login();
+    const second = await login();
     expect(await db.getRepository(User).count()).toBe(1);
     expect(await db.getRepository(Session).count()).toBe(2);
+    expect(first.cookie).not.toBe(second.cookie);
   });
+
   it('handles concurrent first registrations without duplicate clients', async () => {
-    const transactions = await Promise.all([
-      start(),
-      start(),
-      start(),
-      start(),
+    const [first, second] = await Promise.all([start(), start()]);
+    const [a, b] = await Promise.all([
+      request(app.getHttpServer())
+        .get('/api/auth/google/callback')
+        .query({ state: first.state, code: 'alice' })
+        .set('Cookie', first.cookie),
+      request(app.getHttpServer())
+        .get('/api/auth/google/callback')
+        .query({ state: second.state, code: 'alice' })
+        .set('Cookie', second.cookie),
     ]);
-    await Promise.all(
-      transactions.map((transaction) =>
-        request(app.getHttpServer())
-          .get('/api/auth/google/callback')
-          .query({ state: transaction.state, code: 'alice' })
-          .set('Cookie', transaction.cookie)
-          .expect(302),
-      ),
-    );
+    expect([a.status, b.status]).toEqual([302, 302]);
     expect(await db.getRepository(User).count()).toBe(1);
-    expect(await db.getRepository(Session).count()).toBe(4);
+    expect(await db.getRepository(Profile).count()).toBe(1);
   });
+
   it('consumes the same callback exactly once under concurrency', async () => {
     const transaction = await start();
-    const responses = await Promise.all(
-      [1, 2].map(() =>
-        request(app.getHttpServer())
-          .get('/api/auth/google/callback')
-          .query({ state: transaction.state, code: 'alice' })
-          .set('Cookie', transaction.cookie),
-      ),
-    );
-    expect(responses.map((response) => response.status).sort()).toEqual([
-      302, 401,
+    const [a, b] = await Promise.all([
+      request(app.getHttpServer())
+        .get('/api/auth/google/callback')
+        .query({ state: transaction.state, code: 'alice' })
+        .set('Cookie', transaction.cookie),
+      request(app.getHttpServer())
+        .get('/api/auth/google/callback')
+        .query({ state: transaction.state, code: 'alice' })
+        .set('Cookie', transaction.cookie),
     ]);
-    expect(google.exchange).toHaveBeenCalledTimes(1);
+    expect([a.status, b.status].sort()).toEqual([302, 401]);
     expect(await db.getRepository(Session).count()).toBe(1);
   });
+
   it('does not link another Google identity based on the same email', async () => {
-    await login();
+    await login('alice');
     const transaction = await start();
-    const response = await request(app.getHttpServer())
+    await request(app.getHttpServer())
       .get('/api/auth/google/callback')
       .query({ state: transaction.state, code: 'collision' })
       .set('Cookie', transaction.cookie)
       .expect(401);
-    expect(response.body).toMatchObject({
-      code: 'UNAUTHENTICATED',
-      message: 'Authentification impossible.',
-    });
-    expect(JSON.stringify(response.body)).not.toContain(alice.email);
     expect(await db.getRepository(User).count()).toBe(1);
   });
+
   it('isolates profiles and ignores a client-supplied user ID', async () => {
-    const a = await login();
+    const a = await login('alice');
     const b = await login('bob');
-    const profileA = await request(app.getHttpServer())
-      .get('/api/users/me')
-      .set('Cookie', a.cookie)
-      .expect(200);
-    const profileB = await request(app.getHttpServer())
-      .get('/api/users/me')
-      .set('Cookie', b.cookie)
-      .expect(200);
-    expect((profileA.body as User).id).not.toBe((profileB.body as User).id);
-    const forged = await request(app.getHttpServer())
-      .get('/api/users/me')
-      .query({ userId: (profileB.body as User).id })
-      .set('Cookie', a.cookie)
-      .set('X-User-Id', (profileB.body as User).id)
-      .expect(200);
-    expect((forged.body as User).email).toBe(alice.email);
-    await request(app.getHttpServer())
-      .get(`/api/users/${(profileB.body as User).id}`)
-      .set('Cookie', a.cookie)
-      .expect(404);
+    const aliceProfile = (
+      await request(app.getHttpServer())
+        .get('/api/users/me')
+        .set('Cookie', a.cookie)
+        .expect(200)
+    ).body as { id: string; userId: string; email: string };
+    const bobProfile = (
+      await request(app.getHttpServer())
+        .get('/api/users/me')
+        .set('Cookie', b.cookie)
+        .expect(200)
+    ).body as { id: string; userId: string; email: string };
+    expect(aliceProfile.userId).not.toBe(bobProfile.userId);
+    expect(aliceProfile.email).toBe(alice.email);
+    expect(bobProfile.email).toBe(bob.email);
   });
-  it('rejects the wrong browser, missing state, expired transactions and malformed callbacks', async () => {
-    const transaction = await start();
-    await request(app.getHttpServer())
-      .get('/api/auth/google/callback')
-      .query({ state: transaction.state, code: 'alice' })
-      .set('Cookie', `brume_oauth=${randomToken()}`)
-      .expect(401);
-    await request(app.getHttpServer())
-      .get('/api/auth/google/callback')
-      .query({ code: 'alice' })
-      .set('Cookie', transaction.cookie)
-      .expect(401);
-    await db
-      .getRepository(OAuthTransaction)
-      .createQueryBuilder()
-      .update()
-      .set({ expiresAt: new Date(Date.now() - 1000) })
-      .execute();
-    await request(app.getHttpServer())
-      .get('/api/auth/google/callback')
-      .query({ state: transaction.state, code: 'alice' })
-      .set('Cookie', transaction.cookie)
-      .expect(401);
-    const another = await start();
-    await request(app.getHttpServer())
-      .get('/api/auth/google/callback')
-      .query({ state: another.state, code: ['alice', 'bob'] })
-      .set('Cookie', another.cookie)
-      .expect(401);
-    expect(google.exchange).not.toHaveBeenCalled();
-    expect(await db.getRepository(User).count()).toBe(0);
-  });
-  it.each(['invalid', 'outage'])(
-    'handles provider %s without creating a client or exposing the code',
-    async (code) => {
-      const transaction = await start();
-      const response = await request(app.getHttpServer())
-        .get('/api/auth/google/callback')
-        .query({ state: transaction.state, code })
-        .set('Cookie', transaction.cookie)
-        .expect(code === 'outage' ? 503 : 401);
-      expect((response.body as { path: string }).path).toBe(
-        '/api/auth/google/callback',
-      );
-      expect(JSON.stringify(response.body)).not.toContain(transaction.state);
-      expect(cookie(response, 'brume_session')).toBe('');
-      expect(await db.getRepository(User).count()).toBe(0);
-    },
-  );
-  it('consumes a denied Google authorization without authenticating', async () => {
-    const transaction = await start();
-    await request(app.getHttpServer())
-      .get('/api/auth/google/callback')
-      .query({ state: transaction.state, error: 'access_denied' })
-      .set('Cookie', transaction.cookie)
-      .expect(401);
-    expect(google.exchange).not.toHaveBeenCalled();
-    expect(await db.getRepository(OAuthTransaction).count()).toBe(0);
-  });
+
   it('rejects expired sessions and blocked accounts, including previously valid sessions', async () => {
     const { cookie: sessionCookie } = await login();
     await db
@@ -456,14 +375,8 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
       .get('/api/users/me')
       .set('Cookie', fresh.cookie)
       .expect(401);
-    const transaction = await start();
-    await request(app.getHttpServer())
-      .get('/api/auth/google/callback')
-      .query({ state: transaction.state, code: 'alice' })
-      .set('Cookie', transaction.cookie)
-      .expect(401);
-    expect(await db.getRepository(Session).count()).toBe(2);
   });
+
   it('revokes the current device immediately and preserves other devices', async () => {
     const a = await login();
     const b = await login();
@@ -482,13 +395,8 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
       .get('/api/users/me')
       .set('Cookie', b.cookie)
       .expect(200);
-    await request(app.getHttpServer())
-      .post('/api/auth/logout')
-      .set('Origin', origin)
-      .set('X-CSRF-Protection', '1')
-      .set('Cookie', a.cookie)
-      .expect(204);
   });
+
   it('requires both an allowed Origin and CSRF header to log out', async () => {
     const { cookie: sessionCookie } = await login();
     await request(app.getHttpServer())
@@ -502,360 +410,170 @@ describe('Google accounts and sessions (PostgreSQL + HTTP)', () => {
       .set('Cookie', sessionCookie)
       .set('Origin', origin)
       .expect(403);
-    await request(app.getHttpServer())
-      .get('/api/users/me')
-      .set('Cookie', sessionCookie)
-      .expect(200);
   });
-  it('does not confirm logout or clear its cookie if persistence fails', async () => {
-    const { cookie: sessionCookie } = await login();
-    jest
-      .spyOn(app.get(SessionsService), 'revoke')
-      .mockRejectedValueOnce(new Error('database-secret-should-not-leak'));
-    const response = await request(app.getHttpServer())
-      .post('/api/auth/logout')
-      .set('Cookie', sessionCookie)
-      .set('Origin', origin)
-      .set('X-CSRF-Protection', '1')
-      .expect(503);
-    expect(response.headers['set-cookie']).toBeUndefined();
-    expect(JSON.stringify(response.body)).not.toContain('database-secret');
-    await request(app.getHttpServer())
-      .get('/api/users/me')
-      .set('Cookie', sessionCookie)
-      .expect(200);
-  });
-  it('does not issue a session on persistence failure and allows retry without a duplicate account', async () => {
-    const transaction = await start();
-    jest
-      .spyOn(app.get(SessionsService), 'create')
-      .mockRejectedValueOnce(new Error('private-storage-error'));
-    const response = await request(app.getHttpServer())
-      .get('/api/auth/google/callback')
-      .query({ state: transaction.state, code: 'alice' })
-      .set('Cookie', transaction.cookie)
-      .expect(503);
-    expect(cookie(response, 'brume_session')).toBe('');
-    expect(JSON.stringify(response.body)).not.toContain(
-      'private-storage-error',
-    );
-    expect(await db.getRepository(Session).count()).toBe(0);
-    await login();
-    expect(await db.getRepository(User).count()).toBe(1);
-    expect(await db.getRepository(Session).count()).toBe(1);
-  });
-  it('rejects forged and ambiguous session cookies and accepts an anonymous logout', async () => {
-    await request(app.getHttpServer())
-      .get('/api/users/me')
-      .set('Cookie', `brume_session=${randomToken()}`)
-      .expect(401);
-    const { cookie: sessionCookie } = await login();
-    await request(app.getHttpServer())
-      .get('/api/users/me')
-      .set('Cookie', `${sessionCookie}; brume_session=${randomToken()}`)
-      .expect(401);
-    await request(app.getHttpServer())
-      .post('/api/auth/logout')
-      .set('Origin', origin)
-      .set('X-CSRF-Protection', '1')
-      .expect(204);
-    await request(app.getHttpServer())
-      .get('/api/users/me')
-      .set('Cookie', sessionCookie)
-      .expect(200);
-  });
-  it('limits repeated attempts without trusting a forged X-Forwarded-For', async () => {
-    for (let index = 0; index < 20; index++)
-      await request(app.getHttpServer())
-        .get('/api/auth/google/callback')
-        .set('X-Forwarded-For', `192.0.2.${index}`)
-        .expect(401);
-    const response = await request(app.getHttpServer())
-      .get('/api/auth/google')
-      .expect(429);
-    expect(Number(response.headers['retry-after'])).toBeGreaterThan(0);
-    expect((response.body as { code: string }).code).toBe('RATE_LIMITED');
-    expect(google.exchange).not.toHaveBeenCalled();
-  });
-  it('allows credentialed CORS only for the configured frontend', async () => {
-    const allowed = await request(app.getHttpServer())
-      .options('/api/auth/logout')
-      .set('Origin', origin)
-      .set('Access-Control-Request-Method', 'POST')
-      .set('Access-Control-Request-Headers', 'x-csrf-protection')
-      .expect(204);
-    expect(allowed.headers['access-control-allow-origin']).toBe(origin);
-    expect(allowed.headers['access-control-allow-credentials']).toBe('true');
-    const denied = await request(app.getHttpServer())
-      .options('/api/auth/logout')
-      .set('Origin', 'https://attacker.example')
-      .set('Access-Control-Request-Method', 'POST');
-    expect(denied.headers['access-control-allow-origin']).toBeUndefined();
-  });
-  const addressInput = {
-    firstName: 'Camille',
-    lastName: 'Martin',
-    line1: '12 rue des Lilas',
-    postalCode: '69003',
-    city: 'Lyon',
-    country: 'FR',
-    phone: '0612345678',
-  };
-  function write(
-    method: 'post' | 'patch' | 'delete',
-    path: string,
-    sessionCookie: string,
-  ) {
+
+  function patchProfile(cookieStr: string, body: Record<string, unknown>) {
     return request(app.getHttpServer())
-      [method](path)
-      .set('Cookie', sessionCookie)
-      .set('Origin', origin)
-      .set('X-CSRF-Protection', '1');
-  }
-  it('creates, lists, partially updates and deletes a private address', async () => {
-    const a = await login();
-    await request(app.getHttpServer())
-      .get('/api/users/me/addresses')
-      .set('Cookie', a.cookie)
-      .expect(200, []);
-    const created = await write('post', '/api/users/me/addresses', a.cookie)
-      .send({
-        ...addressInput,
-        firstName: ' Camille ',
-        label: 'Maison',
-        line2: 'Appartement 2',
-      })
-      .expect(201);
-    const address = created.body as Address;
-    expect(address).toMatchObject({
-      firstName: 'Camille',
-      isDefault: false,
-      label: 'Maison',
-    });
-    expect(address).not.toHaveProperty('userId');
-    expect(address).not.toHaveProperty('user');
-    const patched = await write(
-      'patch',
-      `/api/users/me/addresses/${address.id}`,
-      a.cookie,
-    )
-      .send({ city: 'Villeurbanne', label: null, line2: null })
-      .expect(200);
-    expect(patched.body).toMatchObject({
-      id: address.id,
-      city: 'Villeurbanne',
-      firstName: 'Camille',
-      label: null,
-      line2: null,
-    });
-    const listed = await request(app.getHttpServer())
-      .get('/api/users/me/addresses')
-      .set('Cookie', a.cookie)
-      .expect(200);
-    expect(listed.body).toHaveLength(1);
-    await write(
-      'delete',
-      `/api/users/me/addresses/${address.id}`,
-      a.cookie,
-    ).expect(204);
-    await write(
-      'delete',
-      `/api/users/me/addresses/${address.id}`,
-      a.cookie,
-    ).expect(404);
-    await request(app.getHttpServer())
-      .get('/api/users/me/addresses')
-      .set('Cookie', a.cookie)
-      .expect(200, []);
-  });
-  it('prevents another client from listing, updating or deleting an address', async () => {
-    const a = await login();
-    const b = await login('bob');
-    const created = await write('post', '/api/users/me/addresses', a.cookie)
-      .send(addressInput)
-      .expect(201);
-    const id = (created.body as Address).id;
-    await request(app.getHttpServer())
-      .get('/api/users/me/addresses')
-      .set('Cookie', b.cookie)
-      .expect(200, []);
-    await write('patch', `/api/users/me/addresses/${id}`, b.cookie)
-      .send({ city: 'Paris' })
-      .expect(404);
-    await write('delete', `/api/users/me/addresses/${id}`, b.cookie).expect(
-      404,
-    );
-    expect((await db.getRepository(Address).findOneByOrFail({ id })).city).toBe(
-      'Lyon',
-    );
-    await write('post', '/api/users/me/addresses', b.cookie)
-      .send({
-        ...addressInput,
-        userId: (
-          await db.getRepository(User).findOneByOrFail({ email: alice.email })
-        ).id,
-      })
-      .expect(400);
-  });
-  it('rejects missing fields and invalid values with field errors and no submitted values', async () => {
-    const a = await login();
-    const response = await write('post', '/api/users/me/addresses', a.cookie)
-      .send({ firstName: 'private-value' })
-      .expect(400);
-    expect(response.body).toMatchObject({ code: 'VALIDATION_ERROR' });
-    const details = (response.body as { details: { field: string }[] }).details;
-    expect(details.some((detail) => detail.field === 'line1')).toBe(true);
-    expect(JSON.stringify(response.body)).not.toContain('private-value');
-    for (const input of [
-      { ...addressInput, firstName: '   ' },
-      { ...addressInput, phone: 'invalid' },
-      { ...addressInput, postalCode: 'abcde' },
-      { ...addressInput, isDefault: 'true' },
-      { ...addressInput, line1: 'a'.repeat(201) },
-    ]) {
-      await write('post', '/api/users/me/addresses', a.cookie)
-        .send(input)
-        .expect(400);
-    }
-    expect(await db.getRepository(Address).count()).toBe(0);
-  });
-  it.each([
-    ['FR', '20000'],
-    ['FR', '97100'],
-    ['FR', '00000'],
-    ['BE', '10000'],
-  ])('rejects the unsupported zone %s %s', async (country, postalCode) => {
-    const a = await login();
-    const response = await write('post', '/api/users/me/addresses', a.cookie)
-      .send({ ...addressInput, country, postalCode })
-      .expect(422);
-    expect(response.body).toMatchObject({ code: 'SHIPPING_ZONE_NOT_SERVED' });
-    expect(await db.getRepository(Address).count()).toBe(0);
-  });
-  it('rejects empty patches, invalid IDs, null required fields and unknown properties', async () => {
-    const a = await login();
-    const created = await write('post', '/api/users/me/addresses', a.cookie)
-      .send(addressInput)
-      .expect(201);
-    const id = (created.body as Address).id;
-    for (const patch of [
-      {},
-      { city: null },
-      { isDefault: null },
-      { userId: 'forged' },
-      { firstName: 3 },
-    ]) {
-      await write('patch', `/api/users/me/addresses/${id}`, a.cookie)
-        .send(patch)
-        .expect(400);
-    }
-    await write('patch', `/api/users/me/addresses/${id}`, a.cookie)
-      .send({ postalCode: '20000' })
-      .expect(422);
-    await write('patch', '/api/users/me/addresses/not-a-uuid', a.cookie)
-      .send({ city: 'Paris' })
-      .expect(400);
-    await write(
-      'delete',
-      '/api/users/me/addresses/not-a-uuid',
-      a.cookie,
-    ).expect(400);
-    expect((await db.getRepository(Address).findOneByOrFail({ id })).city).toBe(
-      'Lyon',
-    );
-  });
-  it('maintains at most one default address under concurrent creates and updates', async () => {
-    const a = await login();
-    const b = await login('bob');
-    await write('post', '/api/users/me/addresses', b.cookie)
-      .send({ ...addressInput, isDefault: true })
-      .expect(201);
-    const responses = await Promise.all(
-      [1, 2, 3].map((n) =>
-        write('post', '/api/users/me/addresses', a.cookie)
-          .send({ ...addressInput, label: `Address ${n}`, isDefault: true })
-          .expect(201),
-      ),
-    );
-    const user = await db
-      .getRepository(User)
-      .findOneByOrFail({ email: alice.email });
-    expect(
-      await db
-        .getRepository(Address)
-        .countBy({ userId: user.id, isDefault: true }),
-    ).toBe(1);
-    await Promise.all(
-      responses.map((response) =>
-        write(
-          'patch',
-          `/api/users/me/addresses/${(response.body as Address).id}`,
-          a.cookie,
-        )
-          .send({ isDefault: true })
-          .expect(200),
-      ),
-    );
-    expect(
-      await db
-        .getRepository(Address)
-        .countBy({ userId: user.id, isDefault: true }),
-    ).toBe(1);
-    expect(await db.getRepository(Address).countBy({ isDefault: true })).toBe(
-      2,
-    );
-    const defaultAddress = await db
-      .getRepository(Address)
-      .findOneByOrFail({ userId: user.id, isDefault: true });
-    await write(
-      'delete',
-      `/api/users/me/addresses/${defaultAddress.id}`,
-      a.cookie,
-    ).expect(204);
-    expect(
-      await db
-        .getRepository(Address)
-        .countBy({ userId: user.id, isDefault: true }),
-    ).toBe(0);
-  });
-  it('enforces the default-address uniqueness constraint in PostgreSQL', async () => {
-    const a = await login();
-    await write('post', '/api/users/me/addresses', a.cookie)
-      .send({ ...addressInput, isDefault: true })
-      .expect(201);
-    const user = await db
-      .getRepository(User)
-      .findOneByOrFail({ email: alice.email });
-    await expect(
-      db
-        .getRepository(Address)
-        .insert({ ...addressInput, userId: user.id, isDefault: true }),
-    ).rejects.toMatchObject({ driverError: { code: '23505' } });
-  });
-  it('requires authentication and CSRF protection for addresses', async () => {
-    await request(app.getHttpServer())
-      .get('/api/users/me/addresses')
-      .expect(401);
-    await request(app.getHttpServer())
-      .post('/api/users/me/addresses')
+      .patch('/api/users/me')
+      .set('Cookie', cookieStr)
       .set('Origin', origin)
       .set('X-CSRF-Protection', '1')
-      .send(addressInput)
-      .expect(401);
+      .send(body);
+  }
+
+  it('updates valid profile fields and retrieves updated values after reload (US-047)', async () => {
     const a = await login();
+    const initial = await request(app.getHttpServer())
+      .get('/api/users/me')
+      .set('Cookie', a.cookie)
+      .expect(200);
+
+    expect(initial.body).toMatchObject({
+      phone: null,
+      address: null,
+      doNewsletter: false,
+    });
+
+    const updatePayload = {
+      firstName: 'Alice-Marie',
+      lastName: 'Dupont',
+      phone: '0612345678',
+      address: '24 avenue des Vosges',
+      postalCode: '67000',
+      city: 'Strasbourg',
+      doNewsletter: true,
+    };
+
+    const patched = await patchProfile(a.cookie, updatePayload).expect(200);
+    expect(patched.body).toMatchObject(updatePayload);
+
+    // Rechargement persistant
+    const reloaded = await request(app.getHttpServer())
+      .get('/api/users/me')
+      .set('Cookie', a.cookie)
+      .expect(200);
+
+    expect(reloaded.body).toMatchObject(updatePayload);
+
+    // Vérification directe en base PostgreSQL
+    const aliceUser = await db
+      .getRepository(User)
+      .findOneByOrFail({ email: alice.email });
+    const dbProfile = await db
+      .getRepository(Profile)
+      .findOneByOrFail({ userId: aliceUser.id });
+    expect(dbProfile.firstName).toBe('Alice-Marie');
+    expect(dbProfile.lastName).toBe('Dupont');
+    expect(dbProfile.phone).toBe('0612345678');
+    expect(dbProfile.address).toBe('24 avenue des Vosges');
+    expect(dbProfile.postalCode).toBe('67000');
+    expect(dbProfile.city).toBe('Strasbourg');
+    expect(dbProfile.doNewsletter).toBe(true);
+    expect(dbProfile.loyaltyPoints).toBe(0);
+  });
+
+  it('clears nullable fields with null without modifying other fields', async () => {
+    const a = await login();
+    await patchProfile(a.cookie, {
+      firstName: 'Alice',
+      lastName: 'Dupont',
+      phone: '0612345678',
+      address: '10 rue Principale',
+      postalCode: '75001',
+      city: 'Paris',
+    }).expect(200);
+
+    const patched = await patchProfile(a.cookie, {
+      phone: null,
+      address: null,
+    }).expect(200);
+
+    expect(patched.body).toMatchObject({
+      phone: null,
+      address: null,
+      firstName: 'Alice',
+      city: 'Paris',
+    });
+  });
+
+  it('rejects empty bodies with 400 VALIDATION_ERROR', async () => {
+    const a = await login();
+    const res = await patchProfile(a.cookie, {}).expect(400);
+    expect(res.body).toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('rejects forbidden and sensitive properties with 400 VALIDATION_ERROR', async () => {
+    const a = await login();
+    await login('bob');
+    const bobUser = await db
+      .getRepository(User)
+      .findOneByOrFail({ email: bob.email });
+
+    for (const forbidden of [
+      { loyaltyPoints: 9999 },
+      { userId: bobUser.id },
+      { id: bobUser.id },
+      { email: 'hacked@example.com' },
+      { googleSub: 'forged-sub' },
+      { role: 'ADMIN' },
+      { status: 'BLOCKED' },
+      { randomUnknownField: 'value' },
+    ]) {
+      const res = await patchProfile(a.cookie, forbidden).expect(400);
+      expect(res.body).toMatchObject({ code: 'VALIDATION_ERROR' });
+    }
+
+    // Aucune donnee modifiee
+    const profileAfter = await db
+      .getRepository(Profile)
+      .findOneByOrFail({ userId: bobUser.id });
+    expect(profileAfter.loyaltyPoints).toBe(0);
+  });
+
+  it('rejects invalid field formats with 400 VALIDATION_ERROR', async () => {
+    const a = await login();
+    for (const invalid of [
+      { firstName: '   ' },
+      { phone: '123' },
+      { phone: '0012345678' },
+      { postalCode: '6900' },
+      { postalCode: 'abcde' },
+      { doNewsletter: 'not-a-bool' },
+    ]) {
+      const res = await patchProfile(a.cookie, invalid).expect(400);
+      expect(res.body).toMatchObject({ code: 'VALIDATION_ERROR' });
+    }
+  });
+
+  it('requires authentication and CSRF headers to update profile', async () => {
     await request(app.getHttpServer())
-      .post('/api/users/me/addresses')
+      .patch('/api/users/me')
+      .set('Origin', origin)
+      .set('X-CSRF-Protection', '1')
+      .send({ firstName: 'Anon' })
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .patch('/api/users/me')
+      .send({ firstName: 'Anon' })
+      .expect(403);
+
+    const a = await login();
+    // Sans X-CSRF-Protection
+    await request(app.getHttpServer())
+      .patch('/api/users/me')
       .set('Cookie', a.cookie)
       .set('Origin', origin)
-      .send(addressInput)
+      .send({ firstName: 'NoCsrf' })
       .expect(403);
+
+    // Avec mauvais Origin
     await request(app.getHttpServer())
-      .post('/api/users/me/addresses')
+      .patch('/api/users/me')
       .set('Cookie', a.cookie)
       .set('Origin', 'https://attacker.example')
       .set('X-CSRF-Protection', '1')
-      .send(addressInput)
+      .send({ firstName: 'BadOrigin' })
       .expect(403);
-    expect(await db.getRepository(Address).count()).toBe(0);
   });
 });

@@ -1,21 +1,29 @@
-import { Controller, Get, Req } from '@nestjs/common';
+import { Body, Controller, Get, Patch } from '@nestjs/common';
 import {
   ApiCookieAuth,
+  ApiHeader,
   ApiOkResponse,
-  ApiTags,
   ApiResponse,
+  ApiTags,
 } from '@nestjs/swagger';
 import { ApiErrorDto } from '../../common/dto/api-error.dto';
-import type { AuthenticatedRequest } from '../auth/session.guard';
-import { publicUser } from './users.service';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { User } from './entities/user.entity';
+import { UsersService } from './users.service';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 
 @ApiTags('users')
 @ApiCookieAuth('sessionCookie')
 @Controller('users')
 export class UsersController {
+  constructor(private readonly usersService: UsersService) {}
+
   @Get('me')
-  @ApiOkResponse({ type: UserResponseDto })
+  @ApiOkResponse({
+    type: UserResponseDto,
+    description: 'Profil du client connecté.',
+  })
   @ApiResponse({
     status: 401,
     type: ApiErrorDto,
@@ -26,7 +34,46 @@ export class UsersController {
     type: ApiErrorDto,
     description: 'AUTH_UNAVAILABLE',
   })
-  me(@Req() request: AuthenticatedRequest) {
-    return publicUser(request.user);
+  me(@CurrentUser() user: User) {
+    return this.usersService.getProfile(user.id);
+  }
+
+  @Patch('me')
+  @ApiHeader({
+    name: 'Origin',
+    required: true,
+    schema: { type: 'string', format: 'uri' },
+  })
+  @ApiHeader({
+    name: 'X-CSRF-Protection',
+    required: true,
+    schema: { type: 'string', enum: ['1'] },
+  })
+  @ApiOkResponse({
+    type: UserResponseDto,
+    description: 'Profil mis à jour.',
+  })
+  @ApiResponse({
+    status: 400,
+    type: ApiErrorDto,
+    description: 'VALIDATION_ERROR',
+  })
+  @ApiResponse({
+    status: 401,
+    type: ApiErrorDto,
+    description: 'UNAUTHENTICATED',
+  })
+  @ApiResponse({
+    status: 403,
+    type: ApiErrorDto,
+    description: 'FORBIDDEN',
+  })
+  @ApiResponse({
+    status: 503,
+    type: ApiErrorDto,
+    description: 'AUTH_UNAVAILABLE',
+  })
+  updateMe(@CurrentUser() user: User, @Body() dto: UpdateProfileDto) {
+    return this.usersService.updateProfile(user.id, dto);
   }
 }
