@@ -175,12 +175,15 @@ export class CartController {
 
   @Get()
   @ApiOperation({
-    summary: 'Consulter le panier actuel (session en cache)',
+    summary:
+      'Mon panier et son total avec précision monétaire explicite (US-024)',
+    description:
+      'Retourne le panier actif avec recalcul exact des lignes, du sous-total TTC et de la disponibilité.',
   })
   @ApiResponse({
     status: 200,
     type: CartResponseDto,
-    description: 'Contenu du panier.',
+    description: 'Contenu du panier et totaux calculés avec précision.',
   })
   async getCart(
     @Req() req: Request,
