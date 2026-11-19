@@ -20,6 +20,7 @@ import { CreateGoogleAccountsAndSessions1793109589589 } from '../src/database/mi
 import { CreateCatalogue1793272229451 } from '../src/database/migrations/1793272229451-CreateCatalogue';
 import { ReplaceAddressesWithProfiles1793280000000 } from '../src/database/migrations/1793280000000-ReplaceAddressesWithProfiles';
 import { CreateProfileProducts1794926453490 } from '../src/database/migrations/1794926453490-CreateProfileProducts';
+import { AddProductSearch1795564800000 } from '../src/database/migrations/1795564800000-AddProductSearch';
 import { AuthModule } from '../src/modules/auth/auth.module';
 import { AuthRateLimit } from '../src/modules/auth/entities/auth-rate-limit.entity';
 import { OAuthTransaction } from '../src/modules/auth/entities/oauth-transaction.entity';
@@ -97,6 +98,7 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
             CreateCatalogue1793272229451,
             ReplaceAddressesWithProfiles1793280000000,
             CreateProfileProducts1794926453490,
+            AddProductSearch1795564800000,
           ],
           migrationsRun: true,
           synchronize: false,
@@ -1091,7 +1093,236 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
       expect((response.body as ValidationError).code).toBe('VALIDATION_ERROR');
     });
   });
+
+  describe('GET /api/products?q= (US-014)', () => {
+    let ids: Record<string, string>;
+
+    beforeAll(async () => {
+      ids = await seedSearchCatalogue(app.get(DataSource));
+    });
+
+    const search = async (q: string, extra = '') =>
+      getCatalogue(`?q=${encodeURIComponent(q)}${extra}`);
+    const found = async (q: string, extra = '') =>
+      names(await search(q, extra)).sort();
+
+    it('trouve un nom avec accents, quelle que soit la saisie, avec plusieurs correspondances', async () => {
+      const expected = ['Cœur de Pêche', 'Thé vert Pêche'];
+
+      expect(await found('peche')).toEqual(expected);
+      expect(await found('Pêche')).toEqual(expected);
+      expect(await found('PECHE')).toEqual(expected);
+      expect(await found('crème brulee')).toEqual(['Crème Brûlée']);
+      // œ est décomposé en oe
+      expect(await found('coeur')).toEqual(['Cœur de Pêche']);
+    });
+
+    it('cherche une partie de mot dans le nom, l’origine, le type de thé et les ingrédients', async () => {
+      expect(await found('jasm')).toEqual(['Thé Vert Jasmin']);
+      expect(await found('oranger')).toEqual(['Thé des Moines']);
+      expect(await found('afrique')).toEqual(['Crème Brûlée']);
+      expect(await found('rooibos')).toEqual(['Crème Brûlée']);
+    });
+
+    it('exige chaque mot, éventuellement dans des champs différents', async () => {
+      // « vert » : type de thé ; « pêche » : nom ou ingrédient
+      expect(await found('vert peche')).toEqual(['Thé vert Pêche']);
+      expect(await found('  chine   VERT ')).toEqual(
+        ['Thé Vert Jasmin', 'Thé vert Pêche'].sort(),
+      );
+    });
+
+    it('renvoie une liste vide et un total à zéro sans correspondance', async () => {
+      const page = await search('introuvable');
+
+      expect(page.data).toEqual([]);
+      expect(page.meta).toEqual({
+        page: 1,
+        limit: 20,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+
+    it('exclut les produits non publiés de la recherche et de toutes les routes publiques', async () => {
+      expect(await found('secrete')).toEqual([]);
+      expect(await found('peche')).not.toContain('Pêche Secrète');
+      expect((await getCatalogue()).meta.total).toBe(5);
+
+      await request(app.getHttpServer())
+        .get(`/api/products/${ids['Pêche Secrète']}`)
+        .expect(404);
+      await request(app.getHttpServer())
+        .get(`/api/products/${ids['Pêche Secrète']}/similar`)
+        .expect(404);
+      const similar = await request(app.getHttpServer())
+        .get(`/api/products/${ids['Thé vert Pêche']}/similar`)
+        .expect(200);
+      expect(
+        (similar.body as CatalogueProductDto[]).map((product) => product.name),
+      ).not.toContain('Pêche Secrète');
+
+      // Népal n'est l'origine que du produit non publié
+      expect((await options()).origin).not.toContain('Népal');
+      expect(
+        (await getValidationError(`?origin=${encodeURIComponent('Népal')}`))
+          .details,
+      ).toEqual([{ field: 'origin', constraints: ['isAllowed'] }]);
+    });
+
+    it('se combine aux filtres, au tri et à la pagination dans un ordre stable', async () => {
+      // « thé » : nom ou ingrédient de base ; typeTea=vert écarte Cœur de Pêche
+      const all = names(await search('thé', '&typeTea=vert'));
+      expect([...all].sort()).toEqual(
+        ['Thé des Moines', 'Thé Vert Jasmin', 'Thé vert Pêche'].sort(),
+      );
+
+      const paged: string[] = [];
+      for (let page = 1; page <= 3; page++) {
+        const result = await search(
+          'thé',
+          `&typeTea=vert&limit=1&page=${page}`,
+        );
+        expect(result.meta).toMatchObject({ total: 3, totalPages: 3 });
+        paged.push(...names(result));
+      }
+      expect(paged).toEqual(all);
+
+      expect(names(await search('the', '&sort=price_asc'))).toEqual([
+        'Thé Vert Jasmin',
+        'Cœur de Pêche',
+        'Thé vert Pêche',
+        'Thé des Moines',
+      ]);
+    });
+
+    it('prend % et _ au pied de la lettre', async () => {
+      expect((await search('%%')).meta.total).toBe(0);
+      expect((await search('__')).meta.total).toBe(0);
+    });
+
+    it('ne traite pas une recherche malveillante comme du SQL', async () => {
+      expect((await search("' OR 1=1 --")).meta.total).toBe(0);
+      expect((await getCatalogue()).meta.total).toBe(5);
+    });
+
+    it.each([
+      ['q=', 'isNotEmpty'],
+      ['q=%20%20%20', 'isNotEmpty'],
+      ['q=a', 'minLength'],
+      [`q=${'a'.repeat(101)}`, 'maxLength'],
+      ['q=the&q=vert', 'isString'],
+    ])('refuse la recherche invalide %s (400)', async (query, constraint) => {
+      const error = await getValidationError(`?${query}`);
+
+      expect(error.code).toBe('VALIDATION_ERROR');
+      expect(error.details).toContainEqual({
+        field: 'q',
+        constraints: expect.arrayContaining([constraint]) as string[],
+      });
+    });
+
+    it('renvoie 503 STOCK_UNAVAILABLE sans détail technique si la base est en panne', async () => {
+      // Simule une panne : la table devient introuvable pour l'API
+      await db.query('ALTER TABLE "products" RENAME TO "products_panne"');
+      try {
+        const response = await request(app.getHttpServer())
+          .get('/api/products?q=peche')
+          .expect(503);
+
+        expect(response.body).toEqual({
+          statusCode: 503,
+          code: 'STOCK_UNAVAILABLE',
+          message: 'Stock momentanément non consultable. Réessayez plus tard.',
+          path: '/api/products',
+          timestamp: expect.any(String) as string,
+        });
+        expect(JSON.stringify(response.body)).not.toMatch(
+          /panne|relation|select/i,
+        );
+      } finally {
+        await db.query('ALTER TABLE "products_panne" RENAME TO "products"');
+      }
+      expect((await search('peche')).meta.total).toBe(2);
+    });
+  });
 });
+
+// Jeu de données dédié à la recherche ; renvoie les ids par nom de produit
+async function seedSearchCatalogue(
+  dataSource: DataSource,
+): Promise<Record<string, string>> {
+  await dataSource.query(
+    'TRUNCATE "profile_products", "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
+  );
+
+  const ingredient = Object.fromEntries(
+    (
+      await dataSource.getRepository(Ingredient).save([
+        { name: 'Thé vert', type: IngredientType.BASE, price: 300 },
+        { name: 'Thé noir', type: IngredientType.BASE, price: 300 },
+        { name: 'Rooibos', type: IngredientType.BASE, price: 250 },
+        { name: 'Pêche', type: IngredientType.DRIED_INGREDIENT, price: 120 },
+        {
+          name: 'Fleur d’oranger',
+          type: IngredientType.LIQUID_FLAVORING,
+          price: 150,
+        },
+      ])
+    ).map((saved) => [saved.name, saved]),
+  );
+
+  const product = (
+    name: string,
+    typeTea: string,
+    origin: string,
+    ingredients: string[],
+    price: number,
+    published = true,
+  ) => ({
+    name,
+    typeTea,
+    origin,
+    published,
+    howMuchCaffeine: CaffeineLevel.MEDIUM,
+    moment: ConsumptionMoment.NOON,
+    ingredients: ingredients.map((key) => ingredient[key]),
+    formats: [
+      dataSource.getRepository(ProductFormat).create({
+        packaging: Packaging.BAG,
+        quantity: 50,
+        price,
+        stock: 10,
+      }),
+    ],
+  });
+
+  const saved = await dataSource
+    .getRepository(Product)
+    .save([
+      product('Thé vert Pêche', 'vert', 'Chine', ['Thé vert', 'Pêche'], 700),
+      product('Thé Vert Jasmin', 'vert', 'Chine', ['Thé vert'], 500),
+      product(
+        'Thé des Moines',
+        'vert',
+        'Japon',
+        ['Thé vert', 'Fleur d’oranger'],
+        900,
+      ),
+      product('Crème Brûlée', 'rooibos', 'Afrique du Sud', ['Rooibos'], 650),
+      product('Cœur de Pêche', 'noir', 'Inde', ['Thé noir', 'Pêche'], 600),
+      product(
+        'Pêche Secrète',
+        'vert',
+        'Népal',
+        ['Thé vert', 'Pêche'],
+        550,
+        false,
+      ),
+    ]);
+
+  return Object.fromEntries(saved.map((p) => [p.name, p.id]));
+}
 
 // Jeu de données dédié à la similarité ; renvoie les ids par nom de produit
 async function seedSimilarProducts(

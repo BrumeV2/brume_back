@@ -11,7 +11,9 @@ import {
   IsString,
   IsUUID,
   Max,
+  MaxLength,
   Min,
+  MinLength,
   Validate,
   ValidatorConstraint,
 } from 'class-validator';
@@ -56,6 +58,23 @@ class PriceRange implements ValidatorConstraintInterface {
 }
 
 export class CatalogueQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    type: String,
+    minLength: 2,
+    maxLength: 100,
+    description:
+      'Recherche texte (US-014), valeur unique. Insensible à la casse et aux accents. Chaque mot doit figurer dans le nom, l’origine, le type de thé ou un ingrédient (ET entre mots). Retirer le paramètre plutôt que l’envoyer vide.',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : value,
+  )
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(2)
+  @MaxLength(100)
+  q?: string;
+
   @ApiPropertyOptional({
     type: [String],
     format: 'uuid',

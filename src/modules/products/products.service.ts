@@ -40,6 +40,26 @@ const LOWEST_PRICE_SQL = `(SELECT MIN(format.price) FROM product_formats format 
 const AVERAGE_RATING_SQL = `(SELECT AVG(link.note) FROM profile_products link WHERE link."productId" = product.id AND link.type = :reviewType)`;
 const RATING_COUNT_SQL = `(SELECT COUNT(link.note) FROM profile_products link WHERE link."productId" = product.id AND link.type = :reviewType)`;
 
+// Recherche texte (US-014) : un mot est trouvé s'il apparaît, sans tenir compte de la casse
+// ni des accents, dans le nom, l'origine, le type de thé ou le nom d'un ingrédient.
+const normalized = (column: string) => `lower(unaccent(${column}))`;
+const SEARCH_WORD_SQL = (param: string) => {
+  const pattern = `${normalized(`:${param}`)} ESCAPE '\\'`;
+  return `(${[
+    `${normalized('product.name')} LIKE ${pattern}`,
+    `${normalized('product.origin')} LIKE ${pattern}`,
+    `${normalized('product."typeTea"')} LIKE ${pattern}`,
+    `EXISTS (SELECT 1 FROM product_ingredients pi JOIN ingredients ingredient ON ingredient.id = pi."ingredientId" WHERE pi."productId" = product.id AND ${normalized('ingredient.name')} LIKE ${pattern})`,
+  ].join(' OR ')})`;
+};
+
+// Mots distincts de la recherche, convertis en motifs LIKE « contient » (% et _ pris littéralement)
+export function searchPatterns(q: string): string[] {
+  return [...new Set(q.split(' ').filter(Boolean))].map(
+    (word) => `%${word.replace(/[\\%_]/g, '\\$&')}%`,
+  );
+}
+
 interface IndicatorsRow {
   id: string;
   lowestPrice: number | null;
@@ -86,6 +106,13 @@ export class ProductsService {
     await this.validateSelections(query);
     // EXISTS filters retain one row per product, before pagination and counting.
     const builder = this.indicatorsQuery();
+    // ET entre les mots : chacun peut être trouvé dans un champ différent
+    if (query.q)
+      searchPatterns(query.q).forEach((pattern, index) =>
+        builder.andWhere(SEARCH_WORD_SQL(`search${index}`), {
+          [`search${index}`]: pattern,
+        }),
+      );
     if (query.origin)
       builder.andWhere('BTRIM(product.origin) IN (:...origin)', {
         origin: query.origin,
@@ -141,7 +168,7 @@ export class ProductsService {
   async findOne(id: string): Promise<ProductDetailDto> {
     const product = await readStock(() =>
       this.productsRepository.findOne({
-        where: { id },
+        where: { id, published: true },
         relations: { ingredients: true, formats: true },
       }),
     );
@@ -177,7 +204,11 @@ export class ProductsService {
   }
 
   async findSimilar(id: string): Promise<CatalogueProductDto[]> {
-    if (!(await readStock(() => this.productsRepository.existsBy({ id })))) {
+    if (
+      !(await readStock(() =>
+        this.productsRepository.existsBy({ id, published: true }),
+      ))
+    ) {
       throw new NotFoundException();
     }
 
@@ -190,6 +221,7 @@ export class ProductsService {
        FROM products candidate
        JOIN products target ON target.id = $1
        WHERE candidate.id <> target.id
+         AND candidate.published
          AND EXISTS (
            SELECT 1 FROM product_formats format
            WHERE format."productId" = candidate.id AND format.stock > 0
@@ -224,7 +256,7 @@ export class ProductsService {
 
     const indicators = await readStock(() =>
       this.indicatorsQuery()
-        .where('product.id IN (:...ids)', { ids })
+        .andWhere('product.id IN (:...ids)', { ids })
         .getRawMany<IndicatorsRow>(),
     );
 
@@ -234,15 +266,21 @@ export class ProductsService {
     );
   }
 
-  // Une ligne par produit avec les indicateurs exposés et utilisés par les tris
+  // Une ligne par produit publié avec les indicateurs exposés et utilisés par les tris
   private indicatorsQuery() {
-    return this.productsRepository
-      .createQueryBuilder('product')
+    return this.publishedProducts()
       .select('product.id', 'id')
       .addSelect(LOWEST_PRICE_SQL, 'lowestPrice')
       .addSelect(AVERAGE_RATING_SQL, 'averageRating')
       .addSelect(RATING_COUNT_SQL, 'ratingCount')
       .setParameter('reviewType', ProfileProductType.REVIEW);
+  }
+
+  // Point d'entrée de toutes les lectures publiques en query builder
+  private publishedProducts() {
+    return this.productsRepository
+      .createQueryBuilder('product')
+      .where('product.published = true');
   }
 
   // Charge les ingrédients des produits et conserve l'ordre des lignes reçues
@@ -268,16 +306,16 @@ export class ProductsService {
       (['origin', 'typeTea', 'ingredients'] as const).map(async (field) => {
         const values = query[field];
         if (!values) return null;
-        const builder = this.productsRepository.createQueryBuilder('product');
+        const builder = this.publishedProducts();
         if (field === 'ingredients') {
           builder
             .innerJoin('product.ingredients', 'ingredient')
             .select('ingredient.id', 'value')
-            .where('ingredient.id IN (:...values)', { values });
+            .andWhere('ingredient.id IN (:...values)', { values });
         } else {
           builder
             .select(`BTRIM(product.${field})`, 'value')
-            .where(`BTRIM(product.${field}) IN (:...values)`, { values });
+            .andWhere(`BTRIM(product.${field}) IN (:...values)`, { values });
         }
         const available = new Set(
           (
@@ -303,8 +341,7 @@ export class ProductsService {
 
   async filters(): Promise<CatalogueFiltersDto> {
     const [values, ingredients, price] = await Promise.all([
-      this.productsRepository
-        .createQueryBuilder('product')
+      this.publishedProducts()
         .select([
           `array_remove(array_agg(DISTINCT NULLIF(BTRIM(product.origin), '')), NULL) AS origin`,
           `array_remove(array_agg(DISTINCT NULLIF(BTRIM(product.typeTea), '')), NULL) AS "typeTea"`,
@@ -317,8 +354,7 @@ export class ProductsService {
           caffeine: string[] | null;
           moment: string[] | null;
         }>(),
-      this.productsRepository
-        .createQueryBuilder('product')
+      this.publishedProducts()
         .innerJoin('product.ingredients', 'ingredient')
         .select('ingredient.id', 'id')
         .addSelect('ingredient.name', 'name')
@@ -326,8 +362,7 @@ export class ProductsService {
         .orderBy('ingredient.name', 'ASC')
         .addOrderBy('ingredient.id', 'ASC')
         .getRawMany<{ id: string; name: string }>(),
-      this.productsRepository
-        .createQueryBuilder('product')
+      this.publishedProducts()
         .innerJoin('product.formats', 'format')
         .select('MIN(format.price)', 'min')
         .addSelect('MAX(format.price)', 'max')

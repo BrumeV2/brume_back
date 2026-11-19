@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Brume API
-  version: 1.3.0
+  version: 1.4.0
   description: |
     Contrat d'API du MVP Brume (thé, café, CBD) — T-003.
 
@@ -162,10 +162,15 @@ paths:
     get:
       tags: [products]
       operationId: listProducts
-      summary: Catalogue paginé avec filtres combinés et tri (US-016, US-017)
-      description: ET entre filtres, OU entre valeurs d'un filtre. Prix appliqué à un format existant, pas au seul prix minimum affiché. Tous les formats du produit restent retournés. Tri global via sort (défaut name_asc), stable par nom puis UUID. Les valeurs origin, typeTea et ingredients doivent être présentes dans le catalogue complet.
+      summary: Catalogue paginé avec recherche, filtres combinés et tri (US-014, US-016, US-017)
+      description: Seuls les produits publiés sont retournés. Recherche q combinée aux filtres par un ET. ET entre filtres, OU entre valeurs d'un filtre. Prix appliqué à un format existant, pas au seul prix minimum affiché. Tous les formats du produit restent retournés. Tri global via sort (défaut name_asc), stable par nom puis UUID. Les valeurs origin, typeTea et ingredients doivent être présentes dans le catalogue complet.
       security: []
       parameters:
+        - name: q
+          in: query
+          description: "Recherche texte (US-014), valeur unique. Espaces de début et de fin retirés, espaces multiples réduits. Insensible à la casse et aux accents. Chaque mot (ET) doit figurer, en sous-chaîne, dans le nom, l'origine, le type de thé ou le nom d'un ingrédient. Pas de tri par pertinence : l'ordre suit sort. Paramètre absent : aucune restriction ; vide ou d'un seul caractère : 400."
+          schema: { type: string, minLength: 2, maxLength: 100 }
+          example: thé vert
         - name: ingredients
           in: query
           description: 'Identifiants des ingrédients liés au catalogue. Répéter le paramètre pour plusieurs valeurs (OU).'
