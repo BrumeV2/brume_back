@@ -21,6 +21,7 @@ import type {
 } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { CaffeineLevel } from '../enums/caffeine-level.enum';
+import { CatalogueSort } from '../enums/catalogue-sort.enum';
 import { ConsumptionMoment } from '../enums/consumption-moment.enum';
 
 const Selection = (lowercase = false) =>
@@ -145,4 +146,14 @@ export class CatalogueQueryDto extends PaginationQueryDto {
   @Max(2147483647)
   @Validate(PriceRange)
   maxPrice?: number;
+
+  @ApiPropertyOptional({
+    enum: CatalogueSort,
+    default: CatalogueSort.NAME_ASC,
+    description:
+      'Tri global, appliqué avant la pagination. Égalités départagées par le nom puis l’UUID. price_* : prix du format le moins cher. rating_desc : note moyenne, puis nombre de notes. Produits sans prix ou sans note toujours en dernier.',
+  })
+  @IsOptional()
+  @IsEnum(CatalogueSort)
+  sort: CatalogueSort = CatalogueSort.NAME_ASC;
 }

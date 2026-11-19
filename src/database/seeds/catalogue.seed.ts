@@ -875,7 +875,7 @@ async function seed() {
 
   await dataSource.transaction(async (manager) => {
     await manager.query(
-      'TRUNCATE "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
+      'TRUNCATE "profile_products", "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
     );
 
     const savedIngredients = await manager.save(
