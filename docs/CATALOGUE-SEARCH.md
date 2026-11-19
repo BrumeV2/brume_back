@@ -11,7 +11,7 @@ GET /api/products?q=peche&typeTea=vert&sort=price_asc&page=1&limit=20
 
 | Règle | Détail |
 |---|---|
-| Champs cherchés | nom du produit, origine, type de thé, nom de chaque ingrédient. La description n'est pas cherchée. |
+| Champs cherchés | nom du produit, origine, type de thé, nom et synonymes de chaque ingrédient ([US-015](CATALOGUE-INGREDIENTS.md)). La description n'est pas cherchée. |
 | Casse et accents | Ignorés des deux côtés (`lower(unaccent(…))`) : `peche`, `Pêche` et `PECHE` sont équivalents. Les ligatures sont décomposées : `coeur` trouve « Cœur de Pêche ». |
 | Mots | La saisie est découpée sur les espaces. **Chaque mot** doit être trouvé (ET), éventuellement dans des champs différents : `vert peche` trouve un thé de type « vert » dont le nom ou un ingrédient contient « pêche ». Les mots répétés comptent une fois. |
 | Partie de mot | Un mot est cherché comme sous-chaîne : `jasm` trouve « Jasmin ». |

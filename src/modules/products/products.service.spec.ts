@@ -10,7 +10,10 @@ import { CatalogueSort } from './enums/catalogue-sort.enum';
 import { ConsumptionMoment } from './enums/consumption-moment.enum';
 import { IngredientType } from './enums/ingredient-type.enum';
 import { Packaging } from './enums/packaging.enum';
-import { ProductsService, searchPatterns } from './products.service';
+import { Ingredient } from './entities/ingredient.entity';
+import { IngredientsMatch } from './enums/ingredients-match.enum';
+import { ProductsService } from './products.service';
+import { searchPatterns } from './search';
 
 interface IndicatorsRow {
   id: string;
@@ -49,6 +52,7 @@ describe('ProductsService', () => {
     where: jest.fn(),
     andWhere: jest.fn(),
     addOrderBy: jest.fn(),
+    distinct: jest.fn(),
     offset: jest.fn(),
     limit: jest.fn(),
     getCount: jest.fn<() => Promise<number>>(),
@@ -65,6 +69,7 @@ describe('ProductsService', () => {
     page: 1,
     limit: 20,
     sort: CatalogueSort.NAME_ASC,
+    ingredientsMatch: IngredientsMatch.ANY,
     ...overrides,
   });
   const repository = {
@@ -78,9 +83,12 @@ describe('ProductsService', () => {
       >(),
   };
 
+  const ingredientsRepository = { createQueryBuilder: jest.fn() };
+
   beforeEach(async () => {
     jest.resetAllMocks();
     repository.createQueryBuilder.mockReturnValue(builder);
+    ingredientsRepository.createQueryBuilder.mockReturnValue(builder);
     for (const method of [
       'select',
       'addSelect',
@@ -88,6 +96,7 @@ describe('ProductsService', () => {
       'where',
       'andWhere',
       'addOrderBy',
+      'distinct',
       'offset',
       'limit',
     ] as const)
@@ -97,6 +106,10 @@ describe('ProductsService', () => {
       providers: [
         ProductsService,
         { provide: getRepositoryToken(Product), useValue: repository },
+        {
+          provide: getRepositoryToken(Ingredient),
+          useValue: ingredientsRepository,
+        },
       ],
     }).compile();
 
@@ -134,6 +147,79 @@ describe('ProductsService', () => {
         expect(String(conditions[0][0])).toContain(
           `lower(unaccent(${field})) LIKE lower(unaccent(:search0))`,
         );
+    });
+
+    it('cherche aussi dans les synonymes des ingrédients (US-015)', async () => {
+      builder.getCount.mockResolvedValue(0);
+      builder.getRawMany.mockResolvedValue([]);
+
+      await service.findCatalogue(query({ q: 'badiane' }));
+
+      const [sql] = builder.andWhere.mock.calls[0];
+      expect(String(sql)).toContain(
+        'EXISTS (SELECT 1 FROM unnest(ingredient.aliases) synonym WHERE lower(unaccent(synonym)) LIKE lower(unaccent(:search0))',
+      );
+    });
+
+    describe('ingrédients sélectionnés (US-015)', () => {
+      const ids = ['id-menthe', 'id-citron'];
+      beforeEach(() => {
+        builder.getCount.mockResolvedValue(0);
+        // validation : les deux ingrédients existent dans le référentiel, puis page vide
+        builder.getRawMany
+          .mockResolvedValueOnce(
+            ids.map((value) => ({ value })) as unknown as IndicatorsRow[],
+          )
+          .mockResolvedValue([]);
+      });
+      const ingredientCondition = () =>
+        builder.andWhere.mock.calls.find(([sql]) =>
+          String(sql).includes(':...ingredients'),
+        )!;
+
+      it('vérifie les UUID dans le référentiel, pas dans les produits', async () => {
+        await service.findCatalogue(query({ ingredients: ids }));
+
+        expect(ingredientsRepository.createQueryBuilder).toHaveBeenCalledWith(
+          'ingredient',
+        );
+        expect(builder.where).toHaveBeenCalledWith(
+          'ingredient.id IN (:...values)',
+          { values: ids },
+        );
+      });
+
+      it('exige au moins un ingrédient par défaut (OU)', async () => {
+        await service.findCatalogue(query({ ingredients: ids }));
+
+        expect(String(ingredientCondition()[0])).toMatch(/^EXISTS/);
+      });
+
+      it('exige tous les ingrédients avec ingredientsMatch=all (ET)', async () => {
+        await service.findCatalogue(
+          query({ ingredients: ids, ingredientsMatch: IngredientsMatch.ALL }),
+        );
+
+        const [sql, parameters] = ingredientCondition();
+        expect(String(sql)).toMatch(/COUNT\(\*\).*= :ingredientCount$/);
+        expect(parameters).toEqual({ ingredients: ids, ingredientCount: 2 });
+      });
+
+      it('refuse un UUID absent du référentiel', async () => {
+        builder.getRawMany.mockReset();
+        builder.getRawMany.mockResolvedValueOnce([
+          { value: 'id-menthe' },
+        ] as unknown as IndicatorsRow[]);
+
+        await expect(
+          service.findCatalogue(query({ ingredients: ids })),
+        ).rejects.toMatchObject({
+          response: {
+            code: 'VALIDATION_ERROR',
+            details: [{ field: 'ingredients', constraints: ['isAllowed'] }],
+          },
+        });
+      });
     });
 
     it('n’ajoute aucune condition de recherche sans q', async () => {
