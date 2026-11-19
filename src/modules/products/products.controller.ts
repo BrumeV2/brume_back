@@ -27,7 +27,8 @@ export class ProductsController {
   @ApiResponse({
     status: 400,
     type: ApiErrorDto,
-    description: 'Paramètre ou valeur de filtre invalide.',
+    description:
+      'Paramètre, recherche ou valeur de filtre invalide (q vide, trop courte ou répétée…).',
   })
   @ApiOkResponse({ type: CataloguePageDto })
   @ApiResponse({

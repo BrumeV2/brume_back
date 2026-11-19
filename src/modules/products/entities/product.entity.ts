@@ -31,6 +31,10 @@ export class Product extends BaseEntity {
   @Column({ type: 'enum', enum: ConsumptionMoment })
   moment: ConsumptionMoment;
 
+  // un produit non publié n'apparaît sur aucune route publique (catalogue, fiche, similaires, choix de filtres)
+  @Column({ type: 'boolean', default: true })
+  published: boolean;
+
   // au moins 1 format : vérifié dans le service
   @OneToMany(() => ProductFormat, (format) => format.product, {
     cascade: true,

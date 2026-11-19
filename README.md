@@ -195,6 +195,7 @@ src/
 - [ ] Catalogue, fiche produit, catégories, stock
 - [x] Filtres catalogue US-016 : ingrédients, origine, type de thé, caféine, moment et prix ([documentation](docs/CATALOGUE-FILTERS.md))
 - [ ] Recherche par nom
+- [x] Recherche produit US-014 : nom, origine, type de thé et ingrédients, sans accents ([documentation](docs/CATALOGUE-SEARCH.md))
 - [x] Tri du catalogue US-017 : nom, prix, nouveautés et note ([documentation](docs/CATALOGUE-SORT.md))
 - [ ] Panier : ajout, quantité, suppression, total
 - [ ] Checkout : adresse, mode de livraison, récapitulatif
