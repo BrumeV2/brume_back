@@ -33,6 +33,7 @@ function buildProduct(overrides: Partial<Product> = {}): Product {
     howMuchCaffeine: CaffeineLevel.HIGH,
     moment: ConsumptionMoment.MORNING,
     published: true,
+    createdById: null,
     ingredients: [],
     formats: [],
     boxes: [],

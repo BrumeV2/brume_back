@@ -30,6 +30,7 @@ describe('CartService', () => {
 
   const mockFormat: ProductFormat = {
     id: 'fmt-1',
+    sku: 'EG-BAG-100',
     product: mockProduct as Product,
     packaging: Packaging.BAG,
     quantity: 100,

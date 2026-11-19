@@ -22,6 +22,7 @@ import { ReplaceAddressesWithProfiles1793280000000 } from '../src/database/migra
 import { CreateProfileProducts1794926453490 } from '../src/database/migrations/1794926453490-CreateProfileProducts';
 import { AddProductSearch1795564800000 } from '../src/database/migrations/1795564800000-AddProductSearch';
 import { AddIngredientAliases1795651200000 } from '../src/database/migrations/1795651200000-AddIngredientAliases';
+import { AddProductCreation1795737600000 } from '../src/database/migrations/1795737600000-AddProductCreation';
 import { IngredientListItemDto } from '../src/modules/products/dto/ingredient-list-item.dto';
 import { AuthModule } from '../src/modules/auth/auth.module';
 import { AuthRateLimit } from '../src/modules/auth/entities/auth-rate-limit.entity';
@@ -102,6 +103,7 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
             CreateProfileProducts1794926453490,
             AddProductSearch1795564800000,
             AddIngredientAliases1795651200000,
+            AddProductCreation1795737600000,
           ],
           migrationsRun: true,
           synchronize: false,

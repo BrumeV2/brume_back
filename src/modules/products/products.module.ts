@@ -1,5 +1,7 @@
 import { AvailabilityService } from './availability/availability.service';
 import { Module } from '@nestjs/common';
+import { AdminProductsController } from './admin-products.controller';
+import { AdminProductsService } from './admin-products.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Box } from './entities/box.entity';
 import { Ingredient } from './entities/ingredient.entity';
@@ -21,8 +23,17 @@ import { ProductsService } from './products.service';
       ProfileProduct,
     ]),
   ],
-  controllers: [ProductsController, IngredientsController],
-  providers: [ProductsService, IngredientsService, AvailabilityService],
+  controllers: [
+    ProductsController,
+    IngredientsController,
+    AdminProductsController,
+  ],
+  providers: [
+    ProductsService,
+    IngredientsService,
+    AvailabilityService,
+    AdminProductsService,
+  ],
   exports: [AvailabilityService],
 })
 export class ProductsModule {}
