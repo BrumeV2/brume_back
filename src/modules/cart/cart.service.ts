@@ -15,6 +15,7 @@ import { CartCacheService } from './cart-cache.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { CartItemResponseDto } from './dto/cart-item-response.dto';
 import { CartResponseDto, CartWarningDto } from './dto/cart-response.dto';
+import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 import type {
   CartCache,
   CartLineCache,
@@ -111,6 +112,89 @@ export class CartService {
     this.logger.debug(
       `Consultation du panier ${cartId} (${cart.items.length} article(s))`,
     );
+    return this.buildCartResponse(cart);
+  }
+
+  async updateItem(
+    cartId: string,
+    itemId: string,
+    dto: UpdateCartItemDto,
+  ): Promise<CartResponseDto> {
+    const cart = this.getOrCreateCart(cartId);
+    const item = cart.items.find((line) => line.id === itemId);
+
+    if (!item) {
+      this.logger.warn(
+        `Ligne introuvable ou non autorisee sur le panier ${cartId} : ${itemId}`,
+      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Ligne de panier introuvable.',
+      });
+    }
+
+    if (item.itemType === 'format') {
+      const format = await this.formatRepo.findOne({
+        where: { id: item.formatId },
+        relations: { product: true },
+      });
+
+      if (!format) {
+        throw new NotFoundException({
+          code: 'PRODUCT_FORMAT_NOT_FOUND',
+          message: 'Variante de produit introuvable.',
+        });
+      }
+
+      if (dto.quantity > format.stock) {
+        const sku =
+          format.product?.typeTea && format.quantity
+            ? `${format.product.typeTea.substring(0, 3).toUpperCase()}-${format.quantity}G`
+            : format.id;
+
+        this.logger.warn(
+          `Stock insuffisant lors de la modification de la ligne ${itemId} sur le panier ${cartId} : demande=${dto.quantity}, disponible=${format.stock}`,
+        );
+        throw new ConflictException({
+          code: 'OUT_OF_STOCK',
+          message: 'Stock insuffisant pour 1 article.',
+          details: [
+            {
+              variantId: format.id,
+              sku,
+              requested: dto.quantity,
+              available: format.stock,
+            },
+          ],
+        });
+      }
+
+      item.unitPrice = format.price;
+    } else if (item.itemType === 'box') {
+      const box = await this.boxRepo.findOne({
+        where: { id: item.boxId },
+      });
+
+      if (!box) {
+        throw new NotFoundException({
+          code: 'BOX_NOT_FOUND',
+          message: 'Coffret introuvable.',
+        });
+      }
+
+      item.unitPrice = box.price;
+    }
+
+    const now = new Date().toISOString();
+    item.quantity = dto.quantity;
+    item.updatedAt = now;
+    cart.updatedAt = now;
+    this.cartCache.set(cart);
+
+    this.logger.log(
+      `Quantite mise a jour pour la ligne ${itemId} sur le panier ${cartId} : ${dto.quantity}`,
+    );
+
     return this.buildCartResponse(cart);
   }
 

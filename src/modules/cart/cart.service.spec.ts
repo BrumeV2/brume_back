@@ -287,4 +287,101 @@ describe('CartService', () => {
       expect(rawLine.image).toBeUndefined();
     });
   });
+
+  describe('Modification de quantité (US-022)', () => {
+    it('augmente puis diminue rapidement une quantité et recalcule les montants', async () => {
+      const added = await service.addItem('cart-update', {
+        formatId: 'fmt-1',
+        quantity: 2,
+      });
+      const itemId = added.items[0].id;
+
+      // Augmentation à 5
+      const increased = await service.updateItem('cart-update', itemId, {
+        quantity: 5,
+      });
+      expect(increased.itemsCount).toBe(5);
+      expect(increased.items[0].quantity).toBe(5);
+      expect(increased.items[0].lineTotalCents).toBe(5 * 1290);
+      expect(increased.itemsTotalCents).toBe(5 * 1290);
+
+      // Diminution à 1
+      const decreased = await service.updateItem('cart-update', itemId, {
+        quantity: 1,
+      });
+      expect(decreased.itemsCount).toBe(1);
+      expect(decreased.items[0].quantity).toBe(1);
+      expect(decreased.items[0].lineTotalCents).toBe(1290);
+      expect(decreased.itemsTotalCents).toBe(1290);
+    });
+
+    it('rejette en 404 si la ligne n existe pas ou appartient à une autre session', async () => {
+      const added = await service.addItem('cart-owner-1', {
+        formatId: 'fmt-1',
+        quantity: 2,
+      });
+      const itemId = added.items[0].id;
+
+      // Tentative de modification de la ligne de cart-owner-1 depuis cart-owner-2
+      await expect(
+        service.updateItem('cart-owner-2', itemId, { quantity: 3 }),
+      ).rejects.toThrow(NotFoundException);
+
+      // Tentative avec un UUID inexistant
+      await expect(
+        service.updateItem(
+          'cart-owner-1',
+          '00000000-0000-0000-0000-000000000000',
+          {
+            quantity: 1,
+          },
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejette en 409 OUT_OF_STOCK si la quantité demandée dépasse le stock du format', async () => {
+      const added = await service.addItem('cart-stock-check', {
+        formatId: 'fmt-1',
+        quantity: 2,
+      });
+      const itemId = added.items[0].id;
+
+      // mockFormat a un stock de 10
+      await expect(
+        service.updateItem('cart-stock-check', itemId, { quantity: 15 }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('modifie la quantité d une box', async () => {
+      const added = await service.addItem('cart-box-update', {
+        boxId: 'box-1',
+        quantity: 1,
+      });
+      const itemId = added.items[0].id;
+
+      const updated = await service.updateItem('cart-box-update', itemId, {
+        quantity: 3,
+      });
+      expect(updated.itemsCount).toBe(3);
+      expect(updated.itemsTotalCents).toBe(3 * 3490);
+    });
+
+    it('modifie la quantité d une carte cadeau sans contrainte de stock physique', async () => {
+      const added = await service.addItem('cart-gc-update', {
+        giftCard: {
+          recipientEmail: 'ami@example.com',
+          senderName: 'Moi',
+          amount: 5000,
+        },
+        quantity: 1,
+      });
+      const itemId = added.items[0].id;
+
+      const updated = await service.updateItem('cart-gc-update', itemId, {
+        quantity: 4,
+      });
+      expect(updated.itemsCount).toBe(4);
+      expect(updated.itemsTotalCents).toBe(4 * 5000);
+    });
+  });
 });
