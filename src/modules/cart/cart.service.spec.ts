@@ -384,4 +384,95 @@ describe('CartService', () => {
       expect(updated.itemsTotalCents).toBe(4 * 5000);
     });
   });
+
+  describe('Suppression idempotente d une ligne (US-023)', () => {
+    it('supprime une ligne puis la dernière ligne du panier avec recalcul exact des totaux', async () => {
+      // Panier initial avec 2 articles : un format et une box
+      await service.addItem('cart-remove-flow', {
+        formatId: 'fmt-1',
+        quantity: 2,
+      });
+      const secondAdd = await service.addItem('cart-remove-flow', {
+        boxId: 'box-1',
+        quantity: 1,
+      });
+
+      expect(secondAdd.itemsCount).toBe(3);
+      expect(secondAdd.itemsTotalCents).toBe(2 * 1290 + 3490);
+
+      const formatItemId = secondAdd.items[0].id;
+      const boxItemId = secondAdd.items[1].id;
+
+      // 1. Suppression de la première ligne
+      const afterFirstRemoval = await service.removeItem(
+        'cart-remove-flow',
+        formatItemId,
+      );
+      expect(afterFirstRemoval.itemsCount).toBe(1);
+      expect(afterFirstRemoval.items).toHaveLength(1);
+      expect(afterFirstRemoval.items[0].id).toBe(boxItemId);
+      expect(afterFirstRemoval.itemsTotalCents).toBe(3490);
+
+      // 2. Suppression de la dernière ligne restante
+      const afterLastRemoval = await service.removeItem(
+        'cart-remove-flow',
+        boxItemId,
+      );
+      expect(afterLastRemoval.itemsCount).toBe(0);
+      expect(afterLastRemoval.items).toHaveLength(0);
+      expect(afterLastRemoval.itemsTotalCents).toBe(0);
+    });
+
+    it('rejette une suppression répétée (idempotence avec code NOT_FOUND au second essai)', async () => {
+      const added = await service.addItem('cart-idempotent', {
+        formatId: 'fmt-1',
+        quantity: 1,
+      });
+      const itemId = added.items[0].id;
+
+      // Premier appel : suppression réussie
+      const firstRemoval = await service.removeItem('cart-idempotent', itemId);
+      expect(firstRemoval.items).toHaveLength(0);
+
+      // Deuxième appel : ligne déjà absente -> 404 NOT_FOUND
+      await expect(
+        service.removeItem('cart-idempotent', itemId),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejette la tentative de suppression d une ligne appartenant à un autre panier', async () => {
+      const addedCart1 = await service.addItem('cart-owner-alice', {
+        formatId: 'fmt-1',
+        quantity: 1,
+      });
+      const itemAliceId = addedCart1.items[0].id;
+
+      // Tentative de suppression depuis le panier de Bob
+      await expect(
+        service.removeItem('cart-owner-bob', itemAliceId),
+      ).rejects.toThrow(NotFoundException);
+
+      // Le panier d'Alice reste intact
+      const cartAlice = await service.getCart('cart-owner-alice');
+      expect(cartAlice.items).toHaveLength(1);
+      expect(cartAlice.items[0].id).toBe(itemAliceId);
+    });
+
+    it('supprime une ligne de carte cadeau', async () => {
+      const added = await service.addItem('cart-gc-remove', {
+        giftCard: {
+          recipientEmail: 'ami@example.com',
+          senderName: 'Moi',
+          amount: 5000,
+        },
+        quantity: 1,
+      });
+      const itemId = added.items[0].id;
+
+      const afterRemoval = await service.removeItem('cart-gc-remove', itemId);
+      expect(afterRemoval.itemsCount).toBe(0);
+      expect(afterRemoval.items).toHaveLength(0);
+      expect(afterRemoval.itemsTotalCents).toBe(0);
+    });
+  });
 });

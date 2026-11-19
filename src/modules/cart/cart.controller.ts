@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Logger,
   Param,
@@ -117,6 +118,38 @@ export class CartController {
       `Reception PATCH /cart/items/${itemId} (quantite: ${dto.quantity}) pour la session ${cartId}`,
     );
     return this.cartService.updateItem(cartId, itemId, dto);
+  }
+
+  @Delete('items/:itemId')
+  @ApiOperation({
+    summary: 'Supprimer une ligne du panier de manière idempotente (US-023)',
+  })
+  @ApiParam({
+    name: 'itemId',
+    type: String,
+    format: 'uuid',
+    description: 'Identifiant de la ligne du panier a supprimer',
+  })
+  @ApiResponse({
+    status: 200,
+    type: CartResponseDto,
+    description: 'Article retire du panier avec succes.',
+  })
+  @ApiResponse({
+    status: 404,
+    type: ApiErrorDto,
+    description: 'NOT_FOUND : ligne introuvable dans ce panier.',
+  })
+  async removeItem(
+    @Param('itemId', new ParseUUIDPipe({ version: '4' })) itemId: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<CartResponseDto> {
+    const cartId = await this.resolveCartId(req, res);
+    this.logger.log(
+      `Reception DELETE /cart/items/${itemId} pour la session ${cartId}`,
+    );
+    return this.cartService.removeItem(cartId, itemId);
   }
 
   @Post('merge')
