@@ -6,7 +6,8 @@ Le backend étend la route publique `GET /api/products` et expose les choix disp
 
 | Paramètre | Type | Valeurs |
 |---|---|---|
-| `ingredients` | UUID v4, sélection multiple | Identifiants retournés par `/products/filters`, uniquement des ingrédients liés à un produit |
+| `ingredients` | UUID v4, sélection multiple | Identifiants du référentiel, retournés par `/products/filters` ou `/ingredients` (US-015) |
+| `ingredientsMatch` | Enum | `any` (défaut, OU) ou `all` (ET), voir [CATALOGUE-INGREDIENTS.md](CATALOGUE-INGREDIENTS.md) |
 | `origin` | Texte, sélection multiple | Origines présentes dans le catalogue |
 | `typeTea` | Texte, sélection multiple | Types de thé présents dans le catalogue, par exemple `noir`, `vert` |
 | `howMuchCaffeine` | Enum, sélection multiple | `none`, `low`, `medium`, `high` |
@@ -23,7 +24,7 @@ Les paramètres de sélection acceptent une valeur simple ou un paramètre rép�
 ## Combinaison des filtres
 
 - **ET** entre filtres différents.
-- **OU** entre valeurs d'un même filtre, y compris les ingrédients.
+- **OU** entre valeurs d'un même filtre. Pour les ingrédients, `ingredientsMatch=all` exige tous les ingrédients choisis (US-015).
 - Filtre absent : aucune restriction sur ce critère.
 - Supprimer un filtre revient à retirer entièrement ce paramètre, pas à envoyer une chaîne vide.
 - Les deux bornes de prix doivent être respectées par **un même format**. Un produit avec des formats à 500 et 1500 centimes ne correspond pas à un intervalle de 700 à 1000.
@@ -77,7 +78,7 @@ La réponse contient :
 - `howMuchCaffeine`, `moment` : valeurs présentes dans le catalogue, dans l'ordre des enums.
 - `price` : `{ min, max }`, bornes des prix des formats en centimes.
 
-Si le catalogue est vide, les listes sont vides et les deux bornes valent null. Les enums valides qui ne sont pas proposés parce qu'aucun produit ne les utilise restent des paramètres autorisés : ils peuvent produire un résultat vide. En revanche, une origine, un type de thé ou un UUID d'ingrédient absent du catalogue renvoie 400 ; le frontend peut recharger les choix si le catalogue a évolué.
+Si le catalogue est vide, les listes sont vides et les deux bornes valent null. Les enums valides qui ne sont pas proposés parce qu'aucun produit ne les utilise restent des paramètres autorisés : ils peuvent produire un résultat vide. En revanche, une origine ou un type de thé absent du catalogue renvoie 400 ; le frontend peut recharger les choix si le catalogue a évolué. Depuis US-015, un ingrédient est accepté dès qu'il existe dans le référentiel : s'il n'est lié à aucun produit publié, la réponse est 200 avec une liste vide. Seul un UUID absent du référentiel renvoie 400.
 
 ## Réponses et erreurs
 
@@ -99,7 +100,7 @@ Exemple d'une valeur absente du catalogue :
 }
 ```
 
-Les requêtes utilisent des paramètres SQL liés. Les filtres relationnels sont exprimés avec `EXISTS` pour éviter les doublons et les erreurs de pagination. Les ingrédients sont vérifiés par leur relation réelle à un produit, pas uniquement par leur existence dans la table.
+Les requêtes utilisent des paramètres SQL liés. Les filtres relationnels sont exprimés avec `EXISTS` pour éviter les doublons et les erreurs de pagination. Les ingrédients sont vérifiés par leur existence dans le référentiel (US-015).
 
 ## Swagger et contrat
 

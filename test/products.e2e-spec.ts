@@ -21,6 +21,8 @@ import { CreateCatalogue1793272229451 } from '../src/database/migrations/1793272
 import { ReplaceAddressesWithProfiles1793280000000 } from '../src/database/migrations/1793280000000-ReplaceAddressesWithProfiles';
 import { CreateProfileProducts1794926453490 } from '../src/database/migrations/1794926453490-CreateProfileProducts';
 import { AddProductSearch1795564800000 } from '../src/database/migrations/1795564800000-AddProductSearch';
+import { AddIngredientAliases1795651200000 } from '../src/database/migrations/1795651200000-AddIngredientAliases';
+import { IngredientListItemDto } from '../src/modules/products/dto/ingredient-list-item.dto';
 import { AuthModule } from '../src/modules/auth/auth.module';
 import { AuthRateLimit } from '../src/modules/auth/entities/auth-rate-limit.entity';
 import { OAuthTransaction } from '../src/modules/auth/entities/oauth-transaction.entity';
@@ -99,6 +101,7 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
             ReplaceAddressesWithProfiles1793280000000,
             CreateProfileProducts1794926453490,
             AddProductSearch1795564800000,
+            AddIngredientAliases1795651200000,
           ],
           migrationsRun: true,
           synchronize: false,
@@ -383,19 +386,20 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
       ),
     ).toBe(true);
   });
-  it('refuse un UUID inexistant ou un ingrédient sans produit', async () => {
+  it('refuse un UUID absent du référentiel, accepte un ingrédient sans produit (US-015)', async () => {
     const orphan = await db.getRepository(Ingredient).save({
       name: 'Sans produit pour validation',
       type: IngredientType.BASE,
       price: 100,
     });
-    for (const id of [randomUUID(), orphan.id]) {
-      const error = await getValidationError(`?ingredients=${id}`);
-      expect(error.details).toContainEqual({
-        field: 'ingredients',
-        constraints: ['isAllowed'],
-      });
-    }
+    const error = await getValidationError(`?ingredients=${randomUUID()}`);
+    expect(error.details).toContainEqual({
+      field: 'ingredients',
+      constraints: ['isAllowed'],
+    });
+    const page = await getCatalogue(`?ingredients=${orphan.id}`);
+    expect(page.data).toEqual([]);
+    expect(page.meta.total).toBe(0);
   });
   it('refuse une liste trop longue ou un mélange de valeurs autorisées et interdites', async () => {
     const query = Array.from(
@@ -1246,7 +1250,353 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
       expect((await search('peche')).meta.total).toBe(2);
     });
   });
+
+  describe('Recherche par ingrédient (US-015)', () => {
+    let ingredientIds: Record<string, string>;
+
+    beforeAll(async () => {
+      ingredientIds = await seedIngredientCatalogue(app.get(DataSource));
+    });
+
+    const listIngredients = async (
+      query = '',
+    ): Promise<IngredientListItemDto[]> => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/ingredients${query}`)
+        .expect(200);
+      return response.body as IngredientListItemDto[];
+    };
+    const byIngredients = async (keys: string[], extra = '') =>
+      getCatalogue(
+        `?${keys.map((key) => `ingredients=${ingredientIds[key]}`).join('&')}${extra}`,
+      );
+
+    it('liste tout le référentiel, publiquement, avec le nombre de produits publiés', async () => {
+      const ingredients = await listIngredients();
+
+      expect(ingredients.map((ingredient) => ingredient.name)).toEqual([
+        'Anis étoilé',
+        'Arôme menthe',
+        'Fève tonka',
+        'Huile essentielle de citron',
+        'Sencha',
+        'Zestes de citron',
+      ]);
+      const count = (name: string) =>
+        ingredients.find((ingredient) => ingredient.name === name)!
+          .productCount;
+      // Sencha Secret (non publié) n'est pas compté
+      expect(count('Sencha')).toBe(4);
+      expect(count('Arôme menthe')).toBe(2);
+      expect(count('Fève tonka')).toBe(0);
+      expect(Object.keys(ingredients[0]).sort()).toEqual(
+        ['aliases', 'id', 'name', 'productCount', 'type'].sort(),
+      );
+      expect(ingredients[0]).toMatchObject({
+        name: 'Anis étoilé',
+        type: IngredientType.DRIED_INGREDIENT,
+        aliases: ['badiane'],
+      });
+    });
+
+    it('trouve un ingrédient présent dans une partie seulement des variantes, une fois par produit', async () => {
+      const page = await byIngredients(['Arôme menthe']);
+
+      // même base Sencha : seules deux variantes aromatiques contiennent la menthe
+      expect(names(page)).toEqual(['Sencha Menthe', 'Sencha Menthe Citron']);
+      expect(page.meta.total).toBe(2);
+      // Sencha Menthe a deux formats : un seul élément, prix du format le moins cher
+      expect(findProduct(page, 'Sencha Menthe').lowestPrice).toBe(500);
+    });
+
+    it('combine les ingrédients en OU par défaut et en ET avec ingredientsMatch=all', async () => {
+      const keys = ['Arôme menthe', 'Zestes de citron'];
+
+      expect(names(await byIngredients(keys))).toEqual([
+        'Sencha Citron',
+        'Sencha Menthe',
+        'Sencha Menthe Citron',
+      ]);
+      expect(names(await byIngredients(keys, '&ingredientsMatch=any'))).toEqual(
+        ['Sencha Citron', 'Sencha Menthe', 'Sencha Menthe Citron'],
+      );
+      expect(names(await byIngredients(keys, '&ingredientsMatch=all'))).toEqual(
+        ['Sencha Menthe Citron'],
+      );
+      // un UUID répété ou en majuscules ne fausse pas le comptage du ET
+      const menthe = ingredientIds['Arôme menthe'];
+      expect(
+        names(
+          await getCatalogue(
+            `?ingredients=${menthe}&ingredients=${menthe.toUpperCase()}&ingredientsMatch=all`,
+          ),
+        ),
+      ).toEqual(['Sencha Menthe', 'Sencha Menthe Citron']);
+    });
+
+    it('se combine avec les filtres, le tri et la pagination', async () => {
+      const keys = ['Arôme menthe', 'Zestes de citron'];
+      const first = await byIngredients(keys, '&sort=price_desc&limit=2');
+      const second = await byIngredients(
+        keys,
+        '&sort=price_desc&limit=2&page=2',
+      );
+
+      expect(first.meta).toMatchObject({ total: 3, totalPages: 2 });
+      expect([...names(first), ...names(second)]).toEqual([
+        'Sencha Menthe Citron',
+        'Sencha Citron',
+        'Sencha Menthe',
+      ]);
+      expect(
+        names(await byIngredients(keys, '&maxPrice=600&ingredientsMatch=all')),
+      ).toEqual([]);
+    });
+
+    it('trouve un ingrédient par synonyme, sans tenir compte de la casse ni des accents', async () => {
+      for (const q of ['badiane', 'BADIANE', 'badïane'])
+        expect(
+          (await listIngredients(`?q=${encodeURIComponent(q)}`)).map(
+            (ingredient) => ingredient.name,
+          ),
+        ).toEqual(['Anis étoilé']);
+      // le synonyme fonctionne aussi dans la recherche libre du catalogue
+      expect(names(await getCatalogue('?q=badiane'))).toEqual(['Sencha Anis']);
+    });
+
+    it('cherche chaque mot dans le nom ou un synonyme, en partie de mot', async () => {
+      expect(
+        (await listIngredients('?q=citron')).map(
+          (ingredient) => ingredient.name,
+        ),
+      ).toEqual(['Huile essentielle de citron', 'Zestes de citron']);
+      expect(
+        (await listIngredients('?q=zeste%20citron')).map(
+          (ingredient) => ingredient.name,
+        ),
+      ).toEqual(['Zestes de citron']);
+      expect(
+        (await listIngredients('?q=ment')).map((ingredient) => ingredient.name),
+      ).toEqual(['Arôme menthe']);
+    });
+
+    it('distingue un ingrédient sans résultat d’un ingrédient inconnu', async () => {
+      // présent au référentiel, mais dans aucun produit publié
+      const tonka = (await listIngredients('?q=tonka'))[0];
+      expect(tonka.productCount).toBe(0);
+      const page = await getCatalogue(`?ingredients=${tonka.id}`);
+      expect(page.data).toEqual([]);
+      expect(page.meta).toEqual({
+        page: 1,
+        limit: 20,
+        total: 0,
+        totalPages: 0,
+      });
+      // ingrédient seulement présent dans un produit non publié
+      expect(
+        (await byIngredients(['Huile essentielle de citron'])).meta.total,
+      ).toBe(0);
+      // aucune saisie ne correspond au référentiel
+      expect(await listIngredients('?q=introuvable')).toEqual([]);
+      // UUID absent du référentiel
+      expect(
+        (await getValidationError(`?ingredients=${randomUUID()}`)).details,
+      ).toEqual([{ field: 'ingredients', constraints: ['isAllowed'] }]);
+    });
+
+    it.each([
+      ['ingredientsMatch=both', 'ingredientsMatch', 'isEnum'],
+      ['ingredientsMatch=ALL', 'ingredientsMatch', 'isEnum'],
+      [
+        'ingredientsMatch=all&ingredientsMatch=any',
+        'ingredientsMatch',
+        'isEnum',
+      ],
+    ])('refuse le paramètre invalide %s', async (query, field, constraint) => {
+      expect((await getValidationError(`?${query}`)).details).toContainEqual({
+        field,
+        constraints: expect.arrayContaining([constraint]) as string[],
+      });
+    });
+
+    it.each([
+      ['q=', 'q', 'isNotEmpty'],
+      ['q=a', 'q', 'minLength'],
+      [`q=${'a'.repeat(101)}`, 'q', 'maxLength'],
+      ['q=a&q=b', 'q', 'isString'],
+      ['type=base', 'type', 'whitelistValidation'],
+    ])(
+      'refuse la recherche d’ingrédient invalide %s (400)',
+      async (query, field, constraint) => {
+        const response = await request(app.getHttpServer())
+          .get(`/api/ingredients?${query}`)
+          .expect(400);
+        const error = response.body as ValidationError;
+        expect(error.code).toBe('VALIDATION_ERROR');
+        expect(error.details).toContainEqual({
+          field,
+          constraints: expect.arrayContaining([constraint]) as string[],
+        });
+      },
+    );
+
+    it('prend % et _ au pied de la lettre et ne traite pas la saisie comme du SQL', async () => {
+      expect(await listIngredients('?q=%25%25')).toEqual([]);
+      expect(await listIngredients('?q=__')).toEqual([]);
+      expect(
+        await listIngredients(`?q=${encodeURIComponent("' OR 1=1 --")}`),
+      ).toEqual([]);
+      expect(await listIngredients()).toHaveLength(6);
+    });
+
+    it('renvoie 503 STOCK_UNAVAILABLE sans détail technique si la base est en panne', async () => {
+      await db.query('ALTER TABLE "ingredients" RENAME TO "ingredients_panne"');
+      try {
+        const response = await request(app.getHttpServer())
+          .get('/api/ingredients?q=menthe')
+          .expect(503);
+        expect(response.body).toMatchObject({
+          code: 'STOCK_UNAVAILABLE',
+          path: '/api/ingredients',
+        });
+        expect(JSON.stringify(response.body)).not.toMatch(
+          /panne|relation|select/i,
+        );
+      } finally {
+        await db.query(
+          'ALTER TABLE "ingredients_panne" RENAME TO "ingredients"',
+        );
+      }
+    });
+
+    it('documente la route et le paramètre dans Swagger et le contrat partagé', () => {
+      const contract = parse(
+        readFileSync('docs/contract/openapi.yaml', 'utf8'),
+      ) as OpenAPIObject;
+      const document = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().build(),
+      );
+      const expected = contract.paths['/ingredients'].get!;
+      const actual = document.paths['/api/ingredients'].get!;
+      expect(
+        actual.parameters!.map((parameter) =>
+          'name' in parameter ? parameter.name : '',
+        ),
+      ).toEqual(['q']);
+      expect(Object.keys(actual.responses).sort()).toEqual(
+        Object.keys(expected.responses).sort(),
+      );
+      const actualItem = document.components!.schemas!
+        .IngredientListItemDto as SchemaObject;
+      const expectedItem = contract.components!.schemas!
+        .IngredientListItem as SchemaObject;
+      expect(Object.keys(actualItem.properties!).sort()).toEqual(
+        Object.keys(expectedItem.properties!).sort(),
+      );
+      expect(actualItem.required?.sort()).toEqual(
+        expectedItem.required?.sort(),
+      );
+    });
+  });
 });
+
+// Jeu de données dédié à la recherche par ingrédient : une même base (Sencha),
+// déclinée en variantes aromatiques dont une partie seulement partage un ingrédient.
+async function seedIngredientCatalogue(
+  dataSource: DataSource,
+): Promise<Record<string, string>> {
+  await dataSource.query(
+    'TRUNCATE "profile_products", "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
+  );
+
+  const ingredient = Object.fromEntries(
+    (
+      await dataSource.getRepository(Ingredient).save([
+        { name: 'Sencha', type: IngredientType.BASE, price: 300 },
+        {
+          name: 'Arôme menthe',
+          type: IngredientType.LIQUID_FLAVORING,
+          price: 120,
+        },
+        {
+          name: 'Zestes de citron',
+          type: IngredientType.DRIED_INGREDIENT,
+          price: 100,
+        },
+        {
+          name: 'Anis étoilé',
+          type: IngredientType.DRIED_INGREDIENT,
+          price: 150,
+          aliases: ['badiane'],
+        },
+        // dans le référentiel, mais dans aucun produit
+        {
+          name: 'Fève tonka',
+          type: IngredientType.DRIED_INGREDIENT,
+          price: 200,
+        },
+        // seulement dans un produit non publié
+        {
+          name: 'Huile essentielle de citron',
+          type: IngredientType.ESSENTIAL_OIL,
+          price: 170,
+        },
+      ])
+    ).map((saved) => [saved.name, saved]),
+  );
+
+  const format = (price: number, quantity = 50) =>
+    dataSource.getRepository(ProductFormat).create({
+      packaging: Packaging.BAG,
+      quantity,
+      price,
+      stock: 10,
+    });
+  const product = (
+    name: string,
+    ingredients: string[],
+    formats: ProductFormat[],
+    published = true,
+  ) => ({
+    name,
+    typeTea: 'vert',
+    origin: 'Japon',
+    published,
+    howMuchCaffeine: CaffeineLevel.MEDIUM,
+    moment: ConsumptionMoment.MORNING,
+    ingredients: ingredients.map((key) => ingredient[key]),
+    formats,
+  });
+
+  await dataSource
+    .getRepository(Product)
+    .save([
+      product('Sencha Nature', ['Sencha'], [format(450)]),
+      product(
+        'Sencha Menthe',
+        ['Sencha', 'Arôme menthe'],
+        [format(500), format(900, 100)],
+      ),
+      product('Sencha Citron', ['Sencha', 'Zestes de citron'], [format(650)]),
+      product(
+        'Sencha Menthe Citron',
+        ['Sencha', 'Arôme menthe', 'Zestes de citron'],
+        [format(700)],
+      ),
+      product('Sencha Anis', ['Anis étoilé'], [format(550)]),
+      product(
+        'Sencha Secret',
+        ['Sencha', 'Arôme menthe', 'Huile essentielle de citron'],
+        [format(600)],
+        false,
+      ),
+    ]);
+
+  return Object.fromEntries(
+    Object.values(ingredient).map((saved) => [saved.name, saved.id]),
+  );
+}
 
 // Jeu de données dédié à la recherche ; renvoie les ids par nom de produit
 async function seedSearchCatalogue(

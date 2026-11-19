@@ -11,6 +11,10 @@ export class Ingredient extends BaseEntity {
   @Column({ type: 'varchar', nullable: true })
   description: string | null;
 
+  // Synonymes pris en compte par les recherches (ex. « badiane » pour Anis étoilé)
+  @Column({ type: 'text', array: true, default: () => "'{}'" })
+  aliases: string[];
+
   @Column({ type: 'enum', enum: IngredientType })
   type: IngredientType;
 

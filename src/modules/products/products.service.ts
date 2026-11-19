@@ -18,10 +18,13 @@ import { CatalogueFormatDto } from './dto/catalogue-format.dto';
 import { CatalogueQueryDto } from './dto/catalogue-query.dto';
 import { CatalogueProductDto } from './dto/catalogue-product.dto';
 import { ProductDetailDto } from './dto/product-detail.dto';
+import { Ingredient } from './entities/ingredient.entity';
 import { ProductFormat } from './entities/product-format.entity';
 import { Product } from './entities/product.entity';
 import { CaffeineLevel } from './enums/caffeine-level.enum';
 import { CatalogueSort } from './enums/catalogue-sort.enum';
+import { IngredientsMatch } from './enums/ingredients-match.enum';
+import { ingredientMatches, matches, searchPatterns } from './search';
 import { ProfileProductType } from './enums/profile-product-type.enum';
 import { ConsumptionMoment } from './enums/consumption-moment.enum';
 import { IngredientType } from './enums/ingredient-type.enum';
@@ -40,25 +43,22 @@ const LOWEST_PRICE_SQL = `(SELECT MIN(format.price) FROM product_formats format 
 const AVERAGE_RATING_SQL = `(SELECT AVG(link.note) FROM profile_products link WHERE link."productId" = product.id AND link.type = :reviewType)`;
 const RATING_COUNT_SQL = `(SELECT COUNT(link.note) FROM profile_products link WHERE link."productId" = product.id AND link.type = :reviewType)`;
 
-// Recherche texte (US-014) : un mot est trouvé s'il apparaît, sans tenir compte de la casse
-// ni des accents, dans le nom, l'origine, le type de thé ou le nom d'un ingrédient.
-const normalized = (column: string) => `lower(unaccent(${column}))`;
-const SEARCH_WORD_SQL = (param: string) => {
-  const pattern = `${normalized(`:${param}`)} ESCAPE '\\'`;
-  return `(${[
-    `${normalized('product.name')} LIKE ${pattern}`,
-    `${normalized('product.origin')} LIKE ${pattern}`,
-    `${normalized('product."typeTea"')} LIKE ${pattern}`,
-    `EXISTS (SELECT 1 FROM product_ingredients pi JOIN ingredients ingredient ON ingredient.id = pi."ingredientId" WHERE pi."productId" = product.id AND ${normalized('ingredient.name')} LIKE ${pattern})`,
+// Recherche texte (US-014) : un mot est trouvé dans le nom, l'origine, le type de thé,
+// ou le nom ou un synonyme d'un ingrédient (US-015).
+const SEARCH_WORD_SQL = (param: string) =>
+  `(${[
+    matches('product.name', param),
+    matches('product.origin', param),
+    matches('product."typeTea"', param),
+    `EXISTS (SELECT 1 FROM product_ingredients pi JOIN ingredients ingredient ON ingredient.id = pi."ingredientId" WHERE pi."productId" = product.id AND ${ingredientMatches('ingredient', param)})`,
   ].join(' OR ')})`;
-};
 
-// Mots distincts de la recherche, convertis en motifs LIKE « contient » (% et _ pris littéralement)
-export function searchPatterns(q: string): string[] {
-  return [...new Set(q.split(' ').filter(Boolean))].map(
-    (word) => `%${word.replace(/[\\%_]/g, '\\$&')}%`,
-  );
-}
+// Filtre ingrédients (US-016, US-015) : au moins un, ou tous les ingrédients sélectionnés.
+// La clé primaire (productId, ingredientId) et la déduplication du DTO rendent le comptage exact.
+const ANY_INGREDIENT_SQL =
+  'EXISTS (SELECT 1 FROM product_ingredients pi WHERE pi."productId" = product.id AND pi."ingredientId" IN (:...ingredients))';
+const ALL_INGREDIENTS_SQL =
+  '(SELECT COUNT(*) FROM product_ingredients pi WHERE pi."productId" = product.id AND pi."ingredientId" IN (:...ingredients)) = :ingredientCount';
 
 interface IndicatorsRow {
   id: string;
@@ -98,6 +98,8 @@ export class ProductsService {
   constructor(
     @InjectRepository(Product)
     private readonly productsRepository: Repository<Product>,
+    @InjectRepository(Ingredient)
+    private readonly ingredientsRepository: Repository<Ingredient>,
   ) {}
 
   async findCatalogue(
@@ -131,8 +133,13 @@ export class ProductsService {
       });
     if (query.ingredients)
       builder.andWhere(
-        'EXISTS (SELECT 1 FROM product_ingredients pi WHERE pi."productId" = product.id AND pi."ingredientId" IN (:...ingredients))',
-        { ingredients: query.ingredients },
+        query.ingredientsMatch === IngredientsMatch.ALL
+          ? ALL_INGREDIENTS_SQL
+          : ANY_INGREDIENT_SQL,
+        {
+          ingredients: query.ingredients,
+          ingredientCount: query.ingredients.length,
+        },
       );
     if (query.minPrice !== undefined || query.maxPrice !== undefined) {
       const bounds: string[] = [];
@@ -306,17 +313,19 @@ export class ProductsService {
       (['origin', 'typeTea', 'ingredients'] as const).map(async (field) => {
         const values = query[field];
         if (!values) return null;
-        const builder = this.publishedProducts();
-        if (field === 'ingredients') {
-          builder
-            .innerJoin('product.ingredients', 'ingredient')
-            .select('ingredient.id', 'value')
-            .andWhere('ingredient.id IN (:...values)', { values });
-        } else {
-          builder
-            .select(`BTRIM(product.${field})`, 'value')
-            .andWhere(`BTRIM(product.${field}) IN (:...values)`, { values });
-        }
+        // Un ingrédient doit exister dans le référentiel, même sans produit (résultat vide, US-015).
+        // Une origine ou un type de thé doit figurer sur un produit publié.
+        const builder =
+          field === 'ingredients'
+            ? this.ingredientsRepository
+                .createQueryBuilder('ingredient')
+                .select('ingredient.id', 'value')
+                .where('ingredient.id IN (:...values)', { values })
+            : this.publishedProducts()
+                .select(`BTRIM(product.${field})`, 'value')
+                .andWhere(`BTRIM(product.${field}) IN (:...values)`, {
+                  values,
+                });
         const available = new Set(
           (
             await readStock(() =>

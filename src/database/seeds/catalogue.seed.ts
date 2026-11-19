@@ -630,6 +630,19 @@ const flavorIngredients: {
   },
 ];
 
+// Synonymes reconnus par les recherches (US-015)
+const ingredientAliases: Record<string, string[]> = {
+  'Anis étoilé': ['badiane'],
+  'Fleurs de souci': ['calendula'],
+  Bleuet: ['centaurée'],
+  Hibiscus: ['bissap', 'karkadé'],
+  Citronnelle: ['lemongrass'],
+  Camomille: ['matricaire'],
+  Rooibos: ['thé rouge'],
+  'Maté vert': ['yerba mate'],
+  'Pu-erh': ['puer', 'pu erh'],
+};
+
 const ingredients = [
   ...bases.map((base) => ({
     name: base.ingredient,
@@ -638,7 +651,15 @@ const ingredients = [
     price: Math.round(base.pricePer100g * 0.4),
   })),
   ...flavorIngredients,
-];
+].map((ingredient) => ({
+  ...ingredient,
+  aliases: ingredientAliases[ingredient.name] ?? [],
+}));
+
+// Un synonyme orphelin signalerait une faute de frappe dans un nom d'ingrédient
+for (const name of Object.keys(ingredientAliases))
+  if (!ingredients.some((ingredient) => ingredient.name === name))
+    throw new Error(`Synonymes définis pour un ingrédient inconnu : ${name}`);
 
 // Générateur pseudo-aléatoire à graine fixe (mulberry32)
 function createRandom(seed: number): () => number {

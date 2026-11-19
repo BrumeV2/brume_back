@@ -6,6 +6,8 @@ import { Ingredient } from './entities/ingredient.entity';
 import { ProductFormat } from './entities/product-format.entity';
 import { Product } from './entities/product.entity';
 import { ProfileProduct } from './entities/profile-product.entity';
+import { IngredientsController } from './ingredients.controller';
+import { IngredientsService } from './ingredients.service';
 import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
 
@@ -19,8 +21,8 @@ import { ProductsService } from './products.service';
       ProfileProduct,
     ]),
   ],
-  controllers: [ProductsController],
-  providers: [ProductsService, AvailabilityService],
+  controllers: [ProductsController, IngredientsController],
+  providers: [ProductsService, IngredientsService, AvailabilityService],
   exports: [AvailabilityService],
 })
 export class ProductsModule {}
