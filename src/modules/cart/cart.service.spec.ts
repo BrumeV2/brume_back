@@ -12,6 +12,7 @@ import { ProductFormat } from '../products/entities/product-format.entity';
 import { Product } from '../products/entities/product.entity';
 import { Packaging } from '../products/enums/packaging.enum';
 import { CartCacheService } from './cart-cache.service';
+import { CartPricingService } from './cart-pricing.service';
 import { CartService } from './cart.service';
 
 describe('CartService', () => {
@@ -84,6 +85,7 @@ describe('CartService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CartService,
+        CartPricingService,
         { provide: CartCacheService, useValue: cacheService },
         { provide: getRepositoryToken(ProductFormat), useValue: formatRepo },
         { provide: getRepositoryToken(Box), useValue: boxRepo },

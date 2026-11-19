@@ -12,6 +12,7 @@ import { Box } from '../products/entities/box.entity';
 import { ProductFormat } from '../products/entities/product-format.entity';
 import { Packaging } from '../products/enums/packaging.enum';
 import { CartCacheService } from './cart-cache.service';
+import { CartPricingService } from './cart-pricing.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { CartItemResponseDto } from './dto/cart-item-response.dto';
 import { CartResponseDto, CartWarningDto } from './dto/cart-response.dto';
@@ -42,6 +43,7 @@ export class CartService {
     @InjectRepository(Box)
     private readonly boxRepo: Repository<Box>,
     private readonly cartCache: CartCacheService,
+    private readonly pricingService: CartPricingService,
   ) {}
 
   getOrCreateCart(cartId: string): CartCache {
@@ -109,10 +111,11 @@ export class CartService {
 
   async getCart(cartId: string): Promise<CartResponseDto> {
     const cart = this.getOrCreateCart(cartId);
-    this.logger.debug(
-      `Consultation du panier ${cartId} (${cart.items.length} article(s))`,
+    const response = await this.buildCartResponse(cart);
+    this.logger.log(
+      `Consultation panier ${cartId} : ${response.itemsCount} article(s), total ${response.itemsTotalCents} centimes`,
     );
-    return this.buildCartResponse(cart);
+    return response;
   }
 
   async updateItem(
@@ -533,14 +536,20 @@ export class CartService {
       boxesMap = new Map(boxes.map((b) => [b.id, b]));
     }
 
-    let itemsTotalCents = 0;
-    let itemsCount = 0;
+    const totals = this.pricingService.calculateCartTotals(
+      cart.items.map((item) => ({
+        unitPriceCents: item.unitPrice,
+        quantity: item.quantity,
+      })),
+    );
+
     const warnings: CartWarningDto[] = [];
 
     const items: CartItemResponseDto[] = cart.items.map((item) => {
-      const lineTotalCents = item.quantity * item.unitPrice;
-      itemsTotalCents += lineTotalCents;
-      itemsCount += item.quantity;
+      const lineTotalCents = this.pricingService.calculateLineTotal(
+        item.unitPrice,
+        item.quantity,
+      );
 
       if (item.itemType === 'format' && item.formatId) {
         const format = formatsMap.get(item.formatId);
@@ -633,8 +642,8 @@ export class CartService {
     return {
       id: cart.id,
       items,
-      itemsCount,
-      itemsTotalCents,
+      itemsCount: totals.itemsCount,
+      itemsTotalCents: totals.itemsTotalCents,
       ageRestricted: false,
       warnings: [...warnings, ...extraWarnings],
       updatedAt: cart.updatedAt,
