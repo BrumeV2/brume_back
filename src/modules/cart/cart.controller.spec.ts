@@ -9,6 +9,7 @@ import { CartService } from './cart.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { CartResponseDto } from './dto/cart-response.dto';
 import { MergeCartDto } from './dto/merge-cart.dto';
+import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 
 describe('CartController', () => {
   let controller: CartController;
@@ -34,6 +35,7 @@ describe('CartController', () => {
       addItem: jest.fn<any>().mockResolvedValue(mockCartResponse),
       getCart: jest.fn<any>().mockResolvedValue(mockCartResponse),
       merge: jest.fn<any>().mockResolvedValue(mockCartResponse),
+      updateItem: jest.fn<any>().mockResolvedValue(mockCartResponse),
     };
 
     sessionsService = {
@@ -158,6 +160,24 @@ describe('CartController', () => {
     expect(cartService.merge).toHaveBeenCalledWith(
       'cart-session-123',
       mergeDto.items,
+    );
+  });
+
+  it('modifie la quantité d une ligne de panier via PATCH /cart/items/:itemId', async () => {
+    const { req, res } = createMockReqRes('cart-session-123');
+    const updateDto: UpdateCartItemDto = { quantity: 4 };
+
+    await controller.updateItem(
+      '11111111-2222-3333-4444-555555555555',
+      updateDto,
+      req,
+      res,
+    );
+
+    expect(cartService.updateItem).toHaveBeenCalledWith(
+      'cart-session-123',
+      '11111111-2222-3333-4444-555555555555',
+      updateDto,
     );
   });
 });

@@ -1,6 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { Body, Controller, Get, Logger, Post, Req, Res } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  Logger,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
+import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { ApiErrorDto } from '../../common/dto/api-error.dto';
@@ -11,6 +22,7 @@ import { CartService } from './cart.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { CartResponseDto } from './dto/cart-response.dto';
 import { MergeCartDto } from './dto/merge-cart.dto';
+import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 
 const CART_COOKIE_NAME = 'brume_cart';
 const CART_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 jours
@@ -61,6 +73,50 @@ export class CartController {
     const cartId = await this.resolveCartId(req, res);
     this.logger.log(`Reception POST /cart/items pour la session ${cartId}`);
     return this.cartService.addItem(cartId, dto);
+  }
+
+  @Patch('items/:itemId')
+  @ApiOperation({
+    summary: 'Modifier la quantité d un article dans le panier (US-022)',
+  })
+  @ApiParam({
+    name: 'itemId',
+    type: String,
+    format: 'uuid',
+    description: 'Identifiant de la ligne du panier',
+  })
+  @ApiResponse({
+    status: 200,
+    type: CartResponseDto,
+    description: 'Quantité mise à jour avec succès.',
+  })
+  @ApiResponse({
+    status: 400,
+    type: ApiErrorDto,
+    description: 'VALIDATION_ERROR : quantité non admise (hors 1-99).',
+  })
+  @ApiResponse({
+    status: 404,
+    type: ApiErrorDto,
+    description: 'NOT_FOUND : ligne introuvable dans ce panier.',
+  })
+  @ApiResponse({
+    status: 409,
+    type: ApiErrorDto,
+    description:
+      'OUT_OF_STOCK : quantité demandée supérieure au stock disponible.',
+  })
+  async updateItem(
+    @Param('itemId', new ParseUUIDPipe({ version: '4' })) itemId: string,
+    @Body() dto: UpdateCartItemDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<CartResponseDto> {
+    const cartId = await this.resolveCartId(req, res);
+    this.logger.log(
+      `Reception PATCH /cart/items/${itemId} (quantite: ${dto.quantity}) pour la session ${cartId}`,
+    );
+    return this.cartService.updateItem(cartId, itemId, dto);
   }
 
   @Post('merge')
