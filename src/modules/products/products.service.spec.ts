@@ -120,10 +120,12 @@ describe('ProductsService', () => {
 
       await service.findCatalogue(query());
 
-      expect(repository.find).toHaveBeenCalledWith({
-        where: { id: In(['a', 'b']) },
-        relations: { ingredients: true },
-      });
+      expect(repository.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: In(['a', 'b']) },
+          relations: { ingredients: true, formats: true },
+        }),
+      );
     });
 
     it('renvoie les champs du catalogue avec les noms des ingrédients et les indicateurs', async () => {
@@ -154,6 +156,8 @@ describe('ProductsService', () => {
           ingredients: ['Thé noir Assam', 'Bergamote'],
           moment: ConsumptionMoment.MORNING,
           image: 'data:image/png;base64,AAAA',
+          availability: 'OUT_OF_STOCK',
+          isOrderable: false,
           lowestPrice: 590,
           averageRating: 4.3,
           ratingCount: 3,
@@ -328,6 +332,8 @@ describe('ProductsService', () => {
 
       expect(result).toEqual({
         id: 'product-1',
+        availability: 'IN_STOCK',
+        isOrderable: true,
         name: 'Earl Grey',
         description: 'Thé noir à la bergamote',
         typeTea: 'noir',
@@ -356,6 +362,8 @@ describe('ProductsService', () => {
             quantity: 50,
             price: 590,
             stock: 40,
+            availability: 'IN_STOCK',
+            isOrderable: true,
           },
           {
             id: 'f2',
@@ -363,6 +371,8 @@ describe('ProductsService', () => {
             quantity: 100,
             price: 990,
             stock: 0,
+            availability: 'OUT_OF_STOCK',
+            isOrderable: false,
           },
         ],
         createdAt: product.createdAt,
@@ -432,6 +442,8 @@ describe('ProductsService', () => {
       expect(result.map((product) => product.id)).toEqual(['b', 'c', 'a']);
       expect(result[0]).toEqual({
         id: 'b',
+        availability: 'OUT_OF_STOCK',
+        isOrderable: false,
         name: 'Thé b',
         typeTea: 'noir',
         origin: 'Inde',

@@ -42,8 +42,12 @@ describe('UsersController', () => {
 
   beforeEach(async () => {
     service = {
-      getProfile: jest.fn().mockResolvedValue(mockProfileResponse),
-      updateProfile: jest.fn().mockResolvedValue(mockProfileResponse),
+      getProfile: jest
+        .fn<UsersService['getProfile']>()
+        .mockResolvedValue(mockProfileResponse),
+      updateProfile: jest
+        .fn<UsersService['updateProfile']>()
+        .mockResolvedValue(mockProfileResponse),
     };
 
     const module: TestingModule = await Test.createTestingModule({

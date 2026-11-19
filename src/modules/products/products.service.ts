@@ -1,4 +1,11 @@
 import {
+  Availability,
+  availabilityOf,
+  isAvailable,
+  productAvailability,
+  readStock,
+} from './availability/availability';
+import {
   BadRequestException,
   Injectable,
   NotFoundException,
@@ -111,16 +118,18 @@ export class ProductsService {
         { minPrice: query.minPrice, maxPrice: query.maxPrice },
       );
     }
-    const total = await builder.getCount();
+    const total = await readStock(() => builder.getCount());
 
     // Tri global avant la pagination ; l'UUID garantit un ordre total et stable entre les pages
     for (const [column, direction, nulls] of SORT_ORDERS[query.sort])
       builder.addOrderBy(column, direction, nulls);
-    const rows = await builder
-      .addOrderBy('product.id', 'ASC')
-      .offset((query.page - 1) * query.limit)
-      .limit(query.limit)
-      .getRawMany<IndicatorsRow>();
+    const rows = await readStock(() =>
+      builder
+        .addOrderBy('product.id', 'ASC')
+        .offset((query.page - 1) * query.limit)
+        .limit(query.limit)
+        .getRawMany<IndicatorsRow>(),
+    );
 
     return new PaginatedResponseDto(
       await this.toCatalogueProducts(rows),
@@ -130,10 +139,12 @@ export class ProductsService {
   }
 
   async findOne(id: string): Promise<ProductDetailDto> {
-    const product = await this.productsRepository.findOne({
-      where: { id },
-      relations: { ingredients: true, formats: true },
-    });
+    const product = await readStock(() =>
+      this.productsRepository.findOne({
+        where: { id },
+        relations: { ingredients: true, formats: true },
+      }),
+    );
     if (!product) throw new NotFoundException();
 
     return {
@@ -158,6 +169,7 @@ export class ProductsService {
           description: ingredient.description,
           type: ingredient.type,
         })),
+      ...productAvailability(product.formats),
       formats: toFormatDtos(product.formats),
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
@@ -165,15 +177,16 @@ export class ProductsService {
   }
 
   async findSimilar(id: string): Promise<CatalogueProductDto[]> {
-    if (!(await this.productsRepository.existsBy({ id }))) {
+    if (!(await readStock(() => this.productsRepository.existsBy({ id })))) {
       throw new NotFoundException();
     }
 
     // Score = ingrédients communs hors base (la base recoupe le type de thé) + même type de thé.
     // Égalités départagées par le moment, puis la caféine, puis le nom.
     // Les produits sans aucun format en stock ne sont pas suggérés.
-    const rows: { id: string }[] = await this.productsRepository.query(
-      `SELECT candidate.id
+    const rows: { id: string }[] = await readStock(() =>
+      this.productsRepository.query(
+        `SELECT candidate.id
        FROM products candidate
        JOIN products target ON target.id = $1
        WHERE candidate.id <> target.id
@@ -197,20 +210,23 @@ export class ProductsService {
          candidate.name ASC,
          candidate.id ASC
        LIMIT $5`,
-      [
-        id,
-        SHARED_INGREDIENT_WEIGHT,
-        IngredientType.BASE,
-        SAME_TEA_TYPE_WEIGHT,
-        SIMILAR_PRODUCTS_COUNT,
-      ],
+        [
+          id,
+          SHARED_INGREDIENT_WEIGHT,
+          IngredientType.BASE,
+          SAME_TEA_TYPE_WEIGHT,
+          SIMILAR_PRODUCTS_COUNT,
+        ],
+      ),
     );
     if (!rows.length) return [];
     const ids = rows.map((row) => row.id);
 
-    const indicators = await this.indicatorsQuery()
-      .where('product.id IN (:...ids)', { ids })
-      .getRawMany<IndicatorsRow>();
+    const indicators = await readStock(() =>
+      this.indicatorsQuery()
+        .where('product.id IN (:...ids)', { ids })
+        .getRawMany<IndicatorsRow>(),
+    );
 
     // la requête des indicateurs ne conserve pas l'ordre du score
     return this.toCatalogueProducts(
@@ -234,10 +250,12 @@ export class ProductsService {
     rows: IndicatorsRow[],
   ): Promise<CatalogueProductDto[]> {
     if (!rows.length) return [];
-    const products = await this.productsRepository.find({
-      where: { id: In(rows.map((row) => row.id)) },
-      relations: { ingredients: true },
-    });
+    const products = await readStock(() =>
+      this.productsRepository.find({
+        where: { id: In(rows.map((row) => row.id)) },
+        relations: { ingredients: true, formats: true },
+      }),
+    );
     const byId = new Map(products.map((product) => [product.id, product]));
     return rows.flatMap((row) => {
       const product = byId.get(row.id);
@@ -262,9 +280,11 @@ export class ProductsService {
             .where(`BTRIM(product.${field}) IN (:...values)`, { values });
         }
         const available = new Set(
-          (await builder.distinct(true).getRawMany<{ value: string }>()).map(
-            (row) => row.value,
-          ),
+          (
+            await readStock(() =>
+              builder.distinct(true).getRawMany<{ value: string }>(),
+            )
+          ).map((row) => row.value),
         );
         return values.every((value) => available.has(value))
           ? null
@@ -337,6 +357,7 @@ function toCatalogueProductDto(
     name: product.name,
     typeTea: product.typeTea,
     origin: product.origin,
+    ...productAvailability(product.formats),
     ingredients: product.ingredients.map((ingredient) => ingredient.name),
     moment: product.moment,
     image: product.image,
@@ -360,6 +381,11 @@ function toFormatDtos(formats: ProductFormat[]): CatalogueFormatDto[] {
       packaging: format.packaging,
       quantity: format.quantity,
       price: format.price,
-      stock: format.stock,
+      stock:
+        availabilityOf(format.stock) === Availability.UNKNOWN
+          ? null
+          : format.stock,
+      availability: availabilityOf(format.stock),
+      isOrderable: isAvailable(availabilityOf(format.stock)),
     }));
 }

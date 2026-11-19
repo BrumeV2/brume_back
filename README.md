@@ -214,3 +214,6 @@ Abonnements TEA-BOX · Fidélité TeaTouan · Bataille des Mélanges · Marketin
 <div align="center">
 <sub>Fait avec 🍵 par l'équipe Brume</sub>
 </div>
+
+
+Disponibilité US-004 : [règles, route de contrôle et intégration panier](docs/PRODUCT-AVAILABILITY.md).

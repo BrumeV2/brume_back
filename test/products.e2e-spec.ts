@@ -1,3 +1,7 @@
+import { Availability } from '../src/modules/products/availability/availability';
+import { jest } from '@jest/globals';
+import { AvailabilityService } from '../src/modules/products/availability/availability.service';
+import { FormatAvailabilityDto } from '../src/modules/products/dto/availability.dto';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
@@ -169,6 +173,8 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
         'ingredients',
         'moment',
         'image',
+        'availability',
+        'isOrderable',
         'lowestPrice',
         'averageRating',
         'ratingCount',
@@ -489,6 +495,269 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
     }
   });
 
+  describe('US-004 availability', () => {
+    let product: Product;
+    beforeEach(async () => {
+      await seedCatalogue(db);
+      product = await db.getRepository(Product).findOneOrFail({
+        where: { name: 'Earl Grey' },
+        relations: { formats: true },
+      });
+    });
+    afterEach(() => jest.restoreAllMocks());
+    const url = (formatId: string) =>
+      `/api/products/${product.id}/formats/${formatId}/availability`;
+
+    it('exposes independent states for three formats of the same product', async () => {
+      const detail = await request(app.getHttpServer())
+        .get(`/api/products/${product.id}`)
+        .expect(200);
+      const formats = (detail.body as ProductDetailDto).formats;
+      expect(
+        formats.map((format) => [
+          format.stock,
+          format.availability,
+          format.isOrderable,
+        ]),
+      ).toEqual([
+        [40, 'IN_STOCK', true],
+        [0, 'OUT_OF_STOCK', false],
+        [5, 'LOW_STOCK', true],
+      ]);
+      expect(detail.body).toMatchObject({
+        availability: 'IN_STOCK',
+        isOrderable: true,
+      });
+      expect(findProduct(await getCatalogue(), 'Earl Grey')).toMatchObject({
+        availability: 'IN_STOCK',
+        isOrderable: true,
+      });
+    });
+    it('checks a requested quantity without reserving stock', async () => {
+      const format = product.formats.find((item) => item.stock === 5)!;
+      for (const [quantity, isOrderable] of [
+        [1, true],
+        [5, true],
+        [6, false],
+      ] as const) {
+        const response = await request(app.getHttpServer())
+          .get(url(format.id))
+          .query({ quantity })
+          .expect(200);
+        expect(response.body).toMatchObject({
+          productId: product.id,
+          formatId: format.id,
+          quantity,
+          availability: 'LOW_STOCK',
+          isOrderable,
+        });
+      }
+      expect(
+        (
+          await db
+            .getRepository(ProductFormat)
+            .findOneByOrFail({ id: format.id })
+        ).stock,
+      ).toBe(5);
+    });
+    it('refuses a simulated basket write when stock runs out after consultation', async () => {
+      const format = product.formats.find((item) => item.stock === 5)!;
+      await request(app.getHttpServer())
+        .get(url(format.id))
+        .expect(200)
+        .expect((response) =>
+          expect((response.body as FormatAvailabilityDto).isOrderable).toBe(
+            true,
+          ),
+        );
+      await db
+        .getRepository(ProductFormat)
+        .update({ id: format.id }, { stock: 0 });
+      // Consumer-side control for the future basket: no production basket route exists yet.
+      await expect(
+        app.get(AvailabilityService).assertOrderable(product.id, format.id, 1),
+      ).rejects.toMatchObject({ response: { code: 'OUT_OF_STOCK' } });
+      const response = await request(app.getHttpServer())
+        .get(url(format.id))
+        .expect(200);
+      expect(response.body).toMatchObject({
+        availability: 'OUT_OF_STOCK',
+        isOrderable: false,
+      });
+    });
+    it('aggregates a fully unavailable product and a product without formats', async () => {
+      await db
+        .getRepository(ProductFormat)
+        .createQueryBuilder()
+        .update()
+        .set({ stock: 0 })
+        .where('"productId" = :id', { id: product.id })
+        .execute();
+      expect(findProduct(await getCatalogue(), 'Earl Grey')).toMatchObject({
+        availability: 'OUT_OF_STOCK',
+        isOrderable: false,
+      });
+      await db
+        .getRepository(ProductFormat)
+        .delete({ product: { id: product.id } });
+      const response = await request(app.getHttpServer())
+        .get(`/api/products/${product.id}`)
+        .expect(200);
+      expect(response.body).toMatchObject({
+        availability: 'OUT_OF_STOCK',
+        isOrderable: false,
+        formats: [],
+      });
+    });
+    it('represents corrupt stock as unknown and refuses ordering', async () => {
+      await db
+        .getRepository(ProductFormat)
+        .createQueryBuilder()
+        .update()
+        .set({ stock: -1 })
+        .where('"productId" = :id', { id: product.id })
+        .execute();
+      const detail = await request(app.getHttpServer())
+        .get(`/api/products/${product.id}`)
+        .expect(200);
+      expect(detail.body).toMatchObject({
+        availability: 'UNKNOWN',
+        isOrderable: false,
+      });
+      expect(
+        (detail.body as ProductDetailDto).formats.every(
+          (item) =>
+            item.stock === null &&
+            item.availability === Availability.UNKNOWN &&
+            !item.isOrderable,
+        ),
+      ).toBe(true);
+      await request(app.getHttpServer())
+        .get(url(product.formats[0].id))
+        .expect(503)
+        .expect((response) =>
+          expect((response.body as ValidationError).code).toBe(
+            'STOCK_UNAVAILABLE',
+          ),
+        );
+    });
+    it('returns sanitized 503 when stock cannot be queried', async () => {
+      jest
+        .spyOn(db.getRepository(ProductFormat), 'findOne')
+        .mockRejectedValueOnce(new Error('private SQL credentials'));
+      const response = await request(app.getHttpServer())
+        .get(url(product.formats[0].id))
+        .expect(503);
+      expect(response.body).toMatchObject({ code: 'STOCK_UNAVAILABLE' });
+      expect(JSON.stringify(response.body)).not.toContain('private SQL');
+    });
+    it('returns stock-specific 503 when the catalogue or detail cannot be read', async () => {
+      jest
+        .spyOn(db.getRepository(Product), 'findOne')
+        .mockRejectedValueOnce(new Error('private SQL'));
+      await request(app.getHttpServer())
+        .get(`/api/products/${product.id}`)
+        .expect(503)
+        .expect((response) =>
+          expect((response.body as ValidationError).code).toBe(
+            'STOCK_UNAVAILABLE',
+          ),
+        );
+      jest
+        .spyOn(db.getRepository(Product), 'find')
+        .mockRejectedValueOnce(new Error('private SQL'));
+      await request(app.getHttpServer())
+        .get('/api/products')
+        .expect(503)
+        .expect((response) =>
+          expect((response.body as ValidationError).code).toBe(
+            'STOCK_UNAVAILABLE',
+          ),
+        );
+    });
+    it('reads stock changes inside the caller transaction', async () => {
+      const format = product.formats.find((item) => item.stock === 5)!;
+      await db.transaction(async (manager) => {
+        await manager
+          .getRepository(ProductFormat)
+          .update({ id: format.id }, { stock: 2 });
+        const service = app.get(AvailabilityService);
+        expect(
+          (await service.assertOrderable(product.id, format.id, 2, manager))
+            .stock,
+        ).toBe(2);
+        await expect(
+          service.assertOrderable(product.id, format.id, 3, manager),
+        ).rejects.toMatchObject({ response: { code: 'OUT_OF_STOCK' } });
+      });
+    });
+    it('accepts 99 units when the current stock is sufficient', async () => {
+      const format = product.formats[0];
+      await db
+        .getRepository(ProductFormat)
+        .update({ id: format.id }, { stock: 99 });
+      const response = await request(app.getHttpServer())
+        .get(url(format.id))
+        .query({ quantity: 99 })
+        .expect(200);
+      expect(response.body).toMatchObject({ quantity: 99, isOrderable: true });
+    });
+    it('rejects formats from another product and missing references', async () => {
+      const other = await db.getRepository(Product).findOneOrFail({
+        where: { name: 'Sencha' },
+        relations: { formats: true },
+      });
+      await request(app.getHttpServer())
+        .get(url(other.formats[0].id))
+        .expect(404);
+      await request(app.getHttpServer()).get(url(randomUUID())).expect(404);
+      await request(app.getHttpServer())
+        .get(
+          `/api/products/${randomUUID()}/formats/${product.formats[0].id}/availability`,
+        )
+        .expect(404);
+      await request(app.getHttpServer()).get(url('invalid')).expect(400);
+    });
+    it.each(['0', '-1', '1.5', '100', '', '1e2', 'true'])(
+      'rejects invalid quantity %s',
+      async (quantity) => {
+        await request(app.getHttpServer())
+          .get(url(product.formats[0].id))
+          .query({ quantity })
+          .expect(400);
+      },
+    );
+    it('rejects duplicate quantities and unknown query parameters', async () => {
+      await request(app.getHttpServer())
+        .get(url(product.formats[0].id))
+        .query({ quantity: ['1', '2'] })
+        .expect(400);
+      await request(app.getHttpServer())
+        .get(url(product.formats[0].id))
+        .query({ stock: 100 })
+        .expect(400);
+    });
+    it('documents the new public check in Swagger and OpenAPI', () => {
+      const contract = parse(
+        readFileSync('docs/contract/openapi.yaml', 'utf8'),
+      ) as OpenAPIObject;
+      const doc = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().build(),
+      );
+      const path = '/products/{id}/formats/{formatId}/availability';
+      expect(
+        Object.keys(doc.paths[`/api${path}`].get!.responses).sort(),
+      ).toEqual(Object.keys(contract.paths[path].get!.responses).sort());
+      const schema = doc.components!.schemas!
+        .FormatAvailabilityDto as SchemaObject;
+      expect(schema.required?.sort()).toEqual(
+        (
+          contract.components!.schemas!.FormatAvailability as SchemaObject
+        ).required?.sort(),
+      );
+    });
+  });
   describe('GET /api/products/:id', () => {
     const getEarlGreyId = async () =>
       findProduct(await getCatalogue(), 'Earl Grey').id;
@@ -511,6 +780,8 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
           'howMuchCaffeine',
           'moment',
           'image',
+          'availability',
+          'isOrderable',
           'ingredients',
           'formats',
           'createdAt',
@@ -789,6 +1060,8 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
           'ingredients',
           'moment',
           'image',
+          'availability',
+          'isOrderable',
           'lowestPrice',
           'averageRating',
           'ratingCount',
