@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { configurationLoaders, DatabaseConfig } from './config';
 import { AuthModule } from './modules/auth/auth.module';
+import { CartModule } from './modules/cart/cart.module';
 import { ProductsModule } from './modules/products/products.module';
 
 @Module({
@@ -29,6 +30,7 @@ import { ProductsModule } from './modules/products/products.module';
       },
     }),
     AuthModule,
+    CartModule,
     ProductsModule,
   ],
   controllers: [AppController],
