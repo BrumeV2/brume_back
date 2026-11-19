@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Brume API
-  version: 1.2.0
+  version: 1.3.0
   description: |
     Contrat d'API du MVP Brume (thé, café, CBD) — T-003.
 
@@ -162,8 +162,8 @@ paths:
     get:
       tags: [products]
       operationId: listProducts
-      summary: Catalogue paginé avec filtres combinés (US-016)
-      description: ET entre filtres, OU entre valeurs d'un filtre. Prix appliqué à un format existant, pas au seul prix minimum affiché. Tous les formats du produit restent retournés. Tri stable par nom puis UUID. Les valeurs origin, typeTea et ingredients doivent être présentes dans le catalogue complet.
+      summary: Catalogue paginé avec filtres combinés et tri (US-016, US-017)
+      description: ET entre filtres, OU entre valeurs d'un filtre. Prix appliqué à un format existant, pas au seul prix minimum affiché. Tous les formats du produit restent retournés. Tri global via sort (défaut name_asc), stable par nom puis UUID. Les valeurs origin, typeTea et ingredients doivent être présentes dans le catalogue complet.
       security: []
       parameters:
         - name: ingredients
@@ -224,6 +224,13 @@ paths:
           in: query
           description: Prix inclus en centimes, sur un même format. minPrice doit être inférieur ou égal à maxPrice.
           schema: { type: integer, minimum: 0, maximum: 2147483647 }
+        - name: sort
+          in: query
+          description: "Tri global appliqué après les filtres et avant la pagination (US-017). Égalités départagées par le nom puis l'UUID. price_asc / price_desc : prix du format le moins cher (lowestPrice). rating_desc : note moyenne puis nombre de notes. newest : date d'ajout décroissante. Produits sans prix ou sans note toujours en dernier. Valeur unique."
+          schema:
+            type: string
+            enum: [name_asc, name_desc, price_asc, price_desc, newest, rating_desc]
+            default: name_asc
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -1180,7 +1187,7 @@ components:
         stock: { type: integer }
     CatalogueProduct:
       type: object
-      required: [id, name, typeTea, origin, ingredients, moment, image]
+      required: [id, name, typeTea, origin, ingredients, moment, image, lowestPrice, averageRating, ratingCount]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -1189,6 +1196,9 @@ components:
         ingredients: { type: array, items: { type: string } }
         moment: { type: string, enum: [morning, noon, snack, evening] }
         image: { type: string, nullable: true, description: Image encodée en base64 }
+        lowestPrice: { type: integer, nullable: true, description: 'Prix du format le moins cher, en centimes. null si aucun format.' }
+        averageRating: { type: number, nullable: true, minimum: 1, maximum: 5, description: 'Note moyenne des avis sur 5, arrondie à une décimale. null si aucune note.' }
+        ratingCount: { type: integer, minimum: 0, description: "Nombre d'avis notés." }
     CataloguePage:
       type: object
       required: [data, meta]
