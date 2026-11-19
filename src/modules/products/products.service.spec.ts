@@ -3,12 +3,21 @@ import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { In } from 'typeorm';
+import { CatalogueQueryDto } from './dto/catalogue-query.dto';
 import { Product } from './entities/product.entity';
 import { CaffeineLevel } from './enums/caffeine-level.enum';
+import { CatalogueSort } from './enums/catalogue-sort.enum';
 import { ConsumptionMoment } from './enums/consumption-moment.enum';
 import { IngredientType } from './enums/ingredient-type.enum';
 import { Packaging } from './enums/packaging.enum';
 import { ProductsService } from './products.service';
+
+interface IndicatorsRow {
+  id: string;
+  lowestPrice: number | null;
+  averageRating: string | null;
+  ratingCount: string;
+}
 
 function buildProduct(overrides: Partial<Product> = {}): Product {
   return {
@@ -23,6 +32,7 @@ function buildProduct(overrides: Partial<Product> = {}): Product {
     ingredients: [],
     formats: [],
     boxes: [],
+    profileProducts: [],
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -33,13 +43,29 @@ describe('ProductsService', () => {
   let service: ProductsService;
   const builder = {
     select: jest.fn(),
+    addSelect: jest.fn(),
+    setParameter: jest.fn(),
+    where: jest.fn(),
     andWhere: jest.fn(),
-    orderBy: jest.fn(),
     addOrderBy: jest.fn(),
-    skip: jest.fn(),
-    take: jest.fn(),
-    getManyAndCount: jest.fn<() => Promise<[Partial<Product>[], number]>>(),
+    offset: jest.fn(),
+    limit: jest.fn(),
+    getCount: jest.fn<() => Promise<number>>(),
+    getRawMany: jest.fn<() => Promise<IndicatorsRow[]>>(),
   };
+  const row = (id: string, overrides: Partial<IndicatorsRow> = {}) => ({
+    id,
+    lowestPrice: 590,
+    averageRating: null,
+    ratingCount: '0',
+    ...overrides,
+  });
+  const query = (overrides: Partial<CatalogueQueryDto> = {}) => ({
+    page: 1,
+    limit: 20,
+    sort: CatalogueSort.NAME_ASC,
+    ...overrides,
+  });
   const repository = {
     createQueryBuilder: jest.fn(),
     find: jest.fn<(options?: unknown) => Promise<Product[]>>(),
@@ -56,11 +82,13 @@ describe('ProductsService', () => {
     repository.createQueryBuilder.mockReturnValue(builder);
     for (const method of [
       'select',
+      'addSelect',
+      'setParameter',
+      'where',
       'andWhere',
-      'orderBy',
       'addOrderBy',
-      'skip',
-      'take',
+      'offset',
+      'limit',
     ] as const)
       builder[method].mockReturnValue(builder);
 
@@ -75,24 +103,22 @@ describe('ProductsService', () => {
   });
 
   describe('findCatalogue', () => {
-    it('pagine sur les produits avec skip/take calculés depuis page et limit', async () => {
-      builder.getManyAndCount.mockResolvedValue([[], 0]);
-      repository.find.mockResolvedValue([]);
+    it('pagine sur les produits avec offset/limit calculés depuis page et limit', async () => {
+      builder.getCount.mockResolvedValue(0);
+      builder.getRawMany.mockResolvedValue([]);
 
-      await service.findCatalogue({ page: 3, limit: 10 });
+      await service.findCatalogue(query({ page: 3, limit: 10 }));
 
-      expect(builder.skip).toHaveBeenCalledWith(20);
-      expect(builder.take).toHaveBeenCalledWith(10);
+      expect(builder.offset).toHaveBeenCalledWith(20);
+      expect(builder.limit).toHaveBeenCalledWith(10);
     });
 
     it('charge les relations uniquement pour les produits de la page', async () => {
-      builder.getManyAndCount.mockResolvedValue([
-        [{ id: 'a' }, { id: 'b' }],
-        2,
-      ]);
+      builder.getCount.mockResolvedValue(2);
+      builder.getRawMany.mockResolvedValue([row('a'), row('b')]);
       repository.find.mockResolvedValue([]);
 
-      await service.findCatalogue({ page: 1, limit: 20 });
+      await service.findCatalogue(query());
 
       expect(repository.find).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -102,17 +128,24 @@ describe('ProductsService', () => {
       );
     });
 
-    it('renvoie les champs du catalogue avec les noms des ingrédients', async () => {
+    it('renvoie les champs du catalogue avec les noms des ingrédients et les indicateurs', async () => {
       const product = buildProduct({
         ingredients: [
           { name: 'Thé noir Assam' },
           { name: 'Bergamote' },
         ] as Product['ingredients'],
       });
-      builder.getManyAndCount.mockResolvedValue([[{ id: product.id }], 1]);
+      builder.getCount.mockResolvedValue(1);
+      builder.getRawMany.mockResolvedValue([
+        row(product.id, {
+          lowestPrice: 590,
+          averageRating: '4.3333333333333333',
+          ratingCount: '3',
+        }),
+      ]);
       repository.find.mockResolvedValue([product]);
 
-      const result = await service.findCatalogue({ page: 1, limit: 20 });
+      const result = await service.findCatalogue(query());
 
       expect(result.data).toEqual([
         {
@@ -125,16 +158,96 @@ describe('ProductsService', () => {
           image: 'data:image/png;base64,AAAA',
           availability: 'OUT_OF_STOCK',
           isOrderable: false,
+          lowestPrice: 590,
+          averageRating: 4.3,
+          ratingCount: 3,
         },
       ]);
       expect(result.data[0]).not.toHaveProperty('formats');
     });
 
-    it('calcule les métadonnées de pagination à partir du total', async () => {
-      builder.getManyAndCount.mockResolvedValue([[], 21]);
-      repository.find.mockResolvedValue([]);
+    it('expose des indicateurs nuls pour un produit sans format ni note', async () => {
+      builder.getCount.mockResolvedValue(1);
+      builder.getRawMany.mockResolvedValue([
+        row('product-1', { lowestPrice: null, averageRating: null }),
+      ]);
+      repository.find.mockResolvedValue([buildProduct()]);
 
-      const result = await service.findCatalogue({ page: 2, limit: 10 });
+      const [product] = (await service.findCatalogue(query())).data;
+
+      expect(product).toMatchObject({
+        lowestPrice: null,
+        averageRating: null,
+        ratingCount: 0,
+      });
+    });
+
+    it("conserve l'ordre du tri SQL, pas celui de find", async () => {
+      builder.getCount.mockResolvedValue(3);
+      builder.getRawMany.mockResolvedValue([row('c'), row('a'), row('b')]);
+      repository.find.mockResolvedValue(
+        ['a', 'b', 'c'].map((id) => buildProduct({ id })),
+      );
+
+      const result = await service.findCatalogue(
+        query({ sort: CatalogueSort.PRICE_ASC }),
+      );
+
+      expect(result.data.map((product) => product.id)).toEqual(['c', 'a', 'b']);
+    });
+
+    it.each([
+      [CatalogueSort.NAME_ASC, [['product.name', 'ASC', undefined]]],
+      [CatalogueSort.NAME_DESC, [['product.name', 'DESC', undefined]]],
+      [
+        CatalogueSort.PRICE_ASC,
+        [
+          ['"lowestPrice"', 'ASC', 'NULLS LAST'],
+          ['product.name', 'ASC', undefined],
+        ],
+      ],
+      [
+        CatalogueSort.PRICE_DESC,
+        [
+          ['"lowestPrice"', 'DESC', 'NULLS LAST'],
+          ['product.name', 'ASC', undefined],
+        ],
+      ],
+      [
+        CatalogueSort.NEWEST,
+        [
+          ['product.createdAt', 'DESC', undefined],
+          ['product.name', 'ASC', undefined],
+        ],
+      ],
+      [
+        CatalogueSort.RATING_DESC,
+        [
+          ['"averageRating"', 'DESC', 'NULLS LAST'],
+          ['"ratingCount"', 'DESC', undefined],
+          ['product.name', 'ASC', undefined],
+        ],
+      ],
+    ])(
+      'trie %s avec des clés secondaires stables, UUID en dernier',
+      async (sort, keys) => {
+        builder.getCount.mockResolvedValue(0);
+        builder.getRawMany.mockResolvedValue([]);
+
+        await service.findCatalogue(query({ sort }));
+
+        expect(builder.addOrderBy.mock.calls).toEqual([
+          ...keys,
+          ['product.id', 'ASC'],
+        ]);
+      },
+    );
+
+    it('calcule les métadonnées de pagination à partir du total', async () => {
+      builder.getCount.mockResolvedValue(21);
+      builder.getRawMany.mockResolvedValue([]);
+
+      const result = await service.findCatalogue(query({ page: 2, limit: 10 }));
 
       expect(result.meta).toEqual({
         page: 2,
@@ -145,10 +258,10 @@ describe('ProductsService', () => {
     });
 
     it('renvoie une page vide sans erreur au-delà de la dernière page', async () => {
-      builder.getManyAndCount.mockResolvedValue([[], 8]);
-      repository.find.mockResolvedValue([]);
+      builder.getCount.mockResolvedValue(8);
+      builder.getRawMany.mockResolvedValue([]);
 
-      const result = await service.findCatalogue({ page: 5, limit: 20 });
+      const result = await service.findCatalogue(query({ page: 5 }));
 
       expect(result.data).toEqual([]);
       expect(result.meta).toEqual({
@@ -290,9 +403,8 @@ describe('ProductsService', () => {
     it('calcule le score avec les poids, en excluant la base, et limite à 3', async () => {
       repository.existsBy.mockResolvedValue(true);
       repository.query.mockResolvedValue([]);
-      repository.find.mockResolvedValue([]);
 
-      await service.findSimilar('product-1');
+      expect(await service.findSimilar('product-1')).toEqual([]);
 
       expect(repository.query).toHaveBeenCalledWith(expect.any(String), [
         'product-1',
@@ -310,7 +422,8 @@ describe('ProductsService', () => {
         { id: 'c' },
         { id: 'a' },
       ]);
-      // `find` renvoie les produits dans un autre ordre que le score
+      // les indicateurs et `find` renvoient les produits dans un autre ordre que le score
+      builder.getRawMany.mockResolvedValue([row('a'), row('c'), row('b')]);
       repository.find.mockResolvedValue(
         ['a', 'b', 'c'].map((id) =>
           buildProduct({
@@ -323,9 +436,8 @@ describe('ProductsService', () => {
 
       const result = await service.findSimilar('product-1');
 
-      expect(repository.find).toHaveBeenCalledWith({
-        where: { id: In(['b', 'c', 'a']) },
-        relations: { ingredients: true, formats: true },
+      expect(builder.where).toHaveBeenCalledWith('product.id IN (:...ids)', {
+        ids: ['b', 'c', 'a'],
       });
       expect(result.map((product) => product.id)).toEqual(['b', 'c', 'a']);
       expect(result[0]).toEqual({
@@ -338,6 +450,9 @@ describe('ProductsService', () => {
         ingredients: ['Cannelle'],
         moment: ConsumptionMoment.MORNING,
         image: 'data:image/png;base64,AAAA',
+        lowestPrice: 590,
+        averageRating: null,
+        ratingCount: 0,
       });
     });
   });

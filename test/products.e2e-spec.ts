@@ -19,6 +19,7 @@ import { configureApp } from '../src/app.setup';
 import { CreateGoogleAccountsAndSessions1793109589589 } from '../src/database/migrations/1793109589589-CreateGoogleAccountsAndSessions';
 import { CreateCatalogue1793272229451 } from '../src/database/migrations/1793272229451-CreateCatalogue';
 import { ReplaceAddressesWithProfiles1793280000000 } from '../src/database/migrations/1793280000000-ReplaceAddressesWithProfiles';
+import { CreateProfileProducts1794926453490 } from '../src/database/migrations/1794926453490-CreateProfileProducts';
 import { AuthModule } from '../src/modules/auth/auth.module';
 import { AuthRateLimit } from '../src/modules/auth/entities/auth-rate-limit.entity';
 import { OAuthTransaction } from '../src/modules/auth/entities/oauth-transaction.entity';
@@ -30,7 +31,9 @@ import { Box } from '../src/modules/products/entities/box.entity';
 import { Ingredient } from '../src/modules/products/entities/ingredient.entity';
 import { ProductFormat } from '../src/modules/products/entities/product-format.entity';
 import { Product } from '../src/modules/products/entities/product.entity';
+import { ProfileProduct } from '../src/modules/products/entities/profile-product.entity';
 import { CaffeineLevel } from '../src/modules/products/enums/caffeine-level.enum';
+import { ProfileProductType } from '../src/modules/products/enums/profile-product-type.enum';
 import { ConsumptionMoment } from '../src/modules/products/enums/consumption-moment.enum';
 import { IngredientType } from '../src/modules/products/enums/ingredient-type.enum';
 import { Packaging } from '../src/modules/products/enums/packaging.enum';
@@ -87,11 +90,13 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
             ProductFormat,
             Ingredient,
             Box,
+            ProfileProduct,
           ],
           migrations: [
             CreateGoogleAccountsAndSessions1793109589589,
             CreateCatalogue1793272229451,
             ReplaceAddressesWithProfiles1793280000000,
+            CreateProfileProducts1794926453490,
           ],
           migrationsRun: true,
           synchronize: false,
@@ -170,6 +175,9 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
         'image',
         'availability',
         'isOrderable',
+        'lowestPrice',
+        'averageRating',
+        'ratingCount',
       ].sort(),
     );
     expect(typeof earlGrey.id).toBe('string');
@@ -471,7 +479,7 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
   it('retourne des choix vides et des prix nuls pour un catalogue vide', async () => {
     try {
       await db.query(
-        'TRUNCATE "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
+        'TRUNCATE "profile_products", "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
       );
       expect(await options()).toEqual({
         ingredients: [],
@@ -848,6 +856,161 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
     });
   });
 
+  describe('GET /api/products?sort= (US-017)', () => {
+    beforeAll(async () => {
+      await seedSortedCatalogue(app.get(DataSource));
+    });
+
+    const sorted = async (sort: string, extra = '') =>
+      names(await getCatalogue(`?sort=${sort}${extra}`));
+
+    // Parcourt toutes les pages de 2 éléments
+    const allPages = async (sort: string) => {
+      const pages: string[] = [];
+      for (let page = 1; page <= 4; page++)
+        pages.push(...(await sorted(sort, `&limit=2&page=${page}`)));
+      return pages;
+    };
+
+    it('trie par nom croissant par défaut', async () => {
+      expect(names(await getCatalogue())).toEqual(await sorted('name_asc'));
+      expect(await sorted('name_asc')).toEqual([
+        'Alpha',
+        'Bravo',
+        'Charlie',
+        'Delta',
+        'Echo',
+        'Foxtrot',
+        'Golf',
+      ]);
+    });
+
+    it('trie par nom décroissant', async () => {
+      expect(await sorted('name_desc')).toEqual([
+        'Golf',
+        'Foxtrot',
+        'Echo',
+        'Delta',
+        'Charlie',
+        'Bravo',
+        'Alpha',
+      ]);
+    });
+
+    it('trie par prix croissant sur plusieurs pages avec des prix égaux, sans doublon ni oubli', async () => {
+      // Alpha, Bravo, Charlie et Echo sont tous à 500 : départagés par le nom.
+      // Foxtrot n'a aucun format : toujours en dernier.
+      const expected = [
+        'Delta',
+        'Alpha',
+        'Bravo',
+        'Charlie',
+        'Echo',
+        'Golf',
+        'Foxtrot',
+      ];
+      expect(await sorted('price_asc')).toEqual(expected);
+      expect(await allPages('price_asc')).toEqual(expected);
+      const second = await getCatalogue('?sort=price_asc&limit=2&page=2');
+      expect(second.meta).toEqual({
+        page: 2,
+        limit: 2,
+        total: 7,
+        totalPages: 4,
+      });
+    });
+
+    it('trie par prix décroissant, produits sans prix toujours en dernier', async () => {
+      const expected = [
+        'Golf',
+        'Alpha',
+        'Bravo',
+        'Charlie',
+        'Echo',
+        'Delta',
+        'Foxtrot',
+      ];
+      expect(await sorted('price_desc')).toEqual(expected);
+      expect(await allPages('price_desc')).toEqual(expected);
+    });
+
+    it('trie par note avec des produits sans avis en dernier', async () => {
+      // Delta 5 (1 note) ; Foxtrot 4,5 (4 notes) avant Alpha et Charlie 4,5 (2 notes) ;
+      // Echo 3 (l'avis sans note est ignoré) ; Bravo et Golf sans note, départagés par le nom.
+      const expected = [
+        'Delta',
+        'Foxtrot',
+        'Alpha',
+        'Charlie',
+        'Echo',
+        'Bravo',
+        'Golf',
+      ];
+      expect(await sorted('rating_desc')).toEqual(expected);
+      expect(await allPages('rating_desc')).toEqual(expected);
+    });
+
+    it('trie par nouveauté, du plus récent au plus ancien', async () => {
+      // Charlie et Delta ont la même date : départagés par le nom
+      expect(await sorted('newest')).toEqual([
+        'Golf',
+        'Charlie',
+        'Delta',
+        'Foxtrot',
+        'Echo',
+        'Bravo',
+        'Alpha',
+      ]);
+    });
+
+    it('applique le tri après les filtres', async () => {
+      expect(await sorted('rating_desc', '&maxPrice=500')).toEqual([
+        'Delta',
+        'Alpha',
+        'Charlie',
+        'Echo',
+        'Bravo',
+      ]);
+    });
+
+    it('expose les indicateurs utilisés par les tris', async () => {
+      const page = await getCatalogue();
+      expect(findProduct(page, 'Alpha')).toMatchObject({
+        lowestPrice: 500,
+        averageRating: 4.5,
+        ratingCount: 2,
+      });
+      expect(findProduct(page, 'Echo')).toMatchObject({
+        averageRating: 3,
+        ratingCount: 1,
+      });
+      expect(findProduct(page, 'Foxtrot')).toMatchObject({
+        lowestPrice: null,
+        averageRating: 4.5,
+        ratingCount: 4,
+      });
+      // Golf n'a qu'un favori : pas compté comme avis
+      expect(findProduct(page, 'Golf')).toMatchObject({
+        lowestPrice: 800,
+        averageRating: null,
+        ratingCount: 0,
+      });
+    });
+
+    it.each(['price', 'PRICE_ASC', 'price_asc&sort=name_asc', ''])(
+      'refuse le tri invalide « %s » (400)',
+      async (value) => {
+        const error = await getValidationError(`?sort=${value}`);
+
+        expect(error.code).toBe('VALIDATION_ERROR');
+        expect(error.details).toContainEqual({
+          field: 'sort',
+          constraints: expect.arrayContaining(['isEnum']) as string[],
+        });
+      },
+    );
+  });
+
   describe('GET /api/products/:id/similar', () => {
     let ids: Record<string, string>;
 
@@ -899,6 +1062,9 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
           'image',
           'availability',
           'isOrderable',
+          'lowestPrice',
+          'averageRating',
+          'ratingCount',
         ].sort(),
       );
     });
@@ -932,7 +1098,7 @@ async function seedSimilarProducts(
   dataSource: DataSource,
 ): Promise<Record<string, string>> {
   await dataSource.query(
-    'TRUNCATE "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
+    'TRUNCATE "profile_products", "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
   );
 
   const ingredient = Object.fromEntries(
@@ -1019,9 +1185,95 @@ async function seedSimilarProducts(
   return Object.fromEntries(saved.map((p) => [p.name, p.id]));
 }
 
+// Jeu de données dédié aux tris : prix égaux, produit sans format, produits sans avis
+async function seedSortedCatalogue(dataSource: DataSource): Promise<void> {
+  await dataSource.query(
+    'TRUNCATE "profile_products", "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
+  );
+  await dataSource.query(
+    `DELETE FROM "utilisateurs" WHERE email LIKE '%@sort.test'`,
+  );
+
+  const profiles = await Promise.all(
+    [1, 2, 3, 4].map(async (index) => {
+      const user = await dataSource.getRepository(User).save({
+        googleSub: `sort-${index}`,
+        email: `client${index}@sort.test`,
+        emailVerifiedAt: new Date(),
+      });
+      return dataSource.getRepository(Profile).save({ userId: user.id });
+    }),
+  );
+
+  const [base] = await dataSource
+    .getRepository(Ingredient)
+    .save([{ name: 'Thé noir', type: IngredientType.BASE, price: 300 }]);
+
+  // [nom, prix des formats, notes, jours depuis l'ajout]
+  const rows: [string, number[], number[], number][] = [
+    ['Echo', [500, 900], [3], 5],
+    ['Alpha', [700, 500], [5, 4], 9],
+    ['Golf', [800], [], 0],
+    ['Charlie', [500], [4, 5], 2],
+    ['Bravo', [500], [], 7],
+    ['Foxtrot', [], [4, 5, 5, 4], 3],
+    ['Delta', [300], [5], 2],
+  ];
+  const products = await dataSource.getRepository(Product).save(
+    rows.map(([name, prices]) => ({
+      name,
+      typeTea: 'noir',
+      howMuchCaffeine: CaffeineLevel.HIGH,
+      moment: ConsumptionMoment.MORNING,
+      ingredients: [base],
+      formats: prices.map((price, index) =>
+        dataSource.getRepository(ProductFormat).create({
+          packaging: Packaging.BAG,
+          quantity: 50 * (index + 1),
+          price,
+          stock: 10,
+        }),
+      ),
+    })),
+  );
+
+  const links: Partial<ProfileProduct>[] = [];
+  for (const [index, [, , notes, days]] of rows.entries()) {
+    const product = products[index];
+    await dataSource.query(
+      // date de référence fixe : deux produits au même nombre de jours ont exactement la même date
+      `UPDATE products SET created_at = TIMESTAMPTZ '2026-11-01T12:00:00Z' - make_interval(days => $2) WHERE id = $1`,
+      [product.id, days],
+    );
+    notes.forEach((note, i) =>
+      links.push({
+        profile: profiles[i],
+        product,
+        type: ProfileProductType.REVIEW,
+        note,
+      }),
+    );
+  }
+  const byName = new Map(products.map((p) => [p.name, p]));
+  // Avis sans note sur Echo : ignoré par la moyenne et le compte
+  links.push({
+    profile: profiles[3],
+    product: byName.get('Echo'),
+    type: ProfileProductType.REVIEW,
+    review: 'Pas encore d’avis tranché.',
+  });
+  // Favori sur Golf : ne compte pas comme un avis
+  links.push({
+    profile: profiles[0],
+    product: byName.get('Golf'),
+    type: ProfileProductType.FAVORITE,
+  });
+  await dataSource.getRepository(ProfileProduct).save(links);
+}
+
 async function seedCatalogue(dataSource: DataSource): Promise<void> {
   await dataSource.query(
-    'TRUNCATE "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
+    'TRUNCATE "profile_products", "box_products", "product_ingredients", "product_formats", "boxes", "products", "ingredients"',
   );
 
   const [theNoir, bergamote, sencha, cannelle] = await dataSource

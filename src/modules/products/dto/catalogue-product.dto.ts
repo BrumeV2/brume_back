@@ -25,4 +25,20 @@ export class CatalogueProductDto {
   /** Image encodée en base64 */
   @ApiProperty({ type: String, nullable: true })
   image: string | null;
+  @ApiProperty({
+    type: 'integer',
+    nullable: true,
+    description:
+      'Prix du format le moins cher, en centimes. null si aucun format.',
+  })
+  lowestPrice: number | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'Note moyenne des avis, sur 5, arrondie à une décimale. null si aucune note.',
+  })
+  averageRating: number | null;
+  @ApiProperty({ type: 'integer', description: 'Nombre d’avis notés.' })
+  ratingCount: number;
 }

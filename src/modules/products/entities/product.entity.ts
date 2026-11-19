@@ -5,6 +5,7 @@ import { ConsumptionMoment } from '../enums/consumption-moment.enum';
 import { Box } from './box.entity';
 import { Ingredient } from './ingredient.entity';
 import { ProductFormat } from './product-format.entity';
+import { ProfileProduct } from './profile-product.entity';
 
 @Entity('products')
 export class Product extends BaseEntity {
@@ -47,4 +48,8 @@ export class Product extends BaseEntity {
 
   @ManyToMany(() => Box, (box) => box.products)
   boxes: Box[];
+
+  // favoris, créations et avis des clients
+  @OneToMany(() => ProfileProduct, (link) => link.product)
+  profileProducts: ProfileProduct[];
 }

@@ -21,6 +21,8 @@ import { ProductDetailDto } from './dto/product-detail.dto';
 import { ProductFormat } from './entities/product-format.entity';
 import { Product } from './entities/product.entity';
 import { CaffeineLevel } from './enums/caffeine-level.enum';
+import { CatalogueSort } from './enums/catalogue-sort.enum';
+import { ProfileProductType } from './enums/profile-product-type.enum';
 import { ConsumptionMoment } from './enums/consumption-moment.enum';
 import { IngredientType } from './enums/ingredient-type.enum';
 
@@ -31,6 +33,45 @@ const ingredientTypeOrder = Object.values(IngredientType);
 const SHARED_INGREDIENT_WEIGHT = 3;
 const SAME_TEA_TYPE_WEIGHT = 2;
 const SIMILAR_PRODUCTS_COUNT = 3;
+
+// Indicateurs du catalogue, calculés par produit (une ligne par produit, sans jointure)
+const LOWEST_PRICE_SQL = `(SELECT MIN(format.price) FROM product_formats format WHERE format."productId" = product.id)`;
+// AVG et COUNT ignorent les avis sans note
+const AVERAGE_RATING_SQL = `(SELECT AVG(link.note) FROM profile_products link WHERE link."productId" = product.id AND link.type = :reviewType)`;
+const RATING_COUNT_SQL = `(SELECT COUNT(link.note) FROM profile_products link WHERE link."productId" = product.id AND link.type = :reviewType)`;
+
+interface IndicatorsRow {
+  id: string;
+  lowestPrice: number | null;
+  // numeric et bigint arrivent en chaîne depuis pg
+  averageRating: string | null;
+  ratingCount: string | number;
+}
+
+// Clés de tri ; product.id ASC est toujours ajouté en dernier.
+// Les alias calculés sont triés NULLS LAST : un produit sans prix ou sans note finit la liste.
+type SortKey = [string, 'ASC' | 'DESC', ('NULLS FIRST' | 'NULLS LAST')?];
+const SORT_ORDERS: Record<CatalogueSort, SortKey[]> = {
+  [CatalogueSort.NAME_ASC]: [['product.name', 'ASC']],
+  [CatalogueSort.NAME_DESC]: [['product.name', 'DESC']],
+  [CatalogueSort.PRICE_ASC]: [
+    ['"lowestPrice"', 'ASC', 'NULLS LAST'],
+    ['product.name', 'ASC'],
+  ],
+  [CatalogueSort.PRICE_DESC]: [
+    ['"lowestPrice"', 'DESC', 'NULLS LAST'],
+    ['product.name', 'ASC'],
+  ],
+  [CatalogueSort.NEWEST]: [
+    ['product.createdAt', 'DESC'],
+    ['product.name', 'ASC'],
+  ],
+  [CatalogueSort.RATING_DESC]: [
+    ['"averageRating"', 'DESC', 'NULLS LAST'],
+    ['"ratingCount"', 'DESC'],
+    ['product.name', 'ASC'],
+  ],
+};
 
 @Injectable()
 export class ProductsService {
@@ -44,9 +85,7 @@ export class ProductsService {
   ): Promise<PaginatedResponseDto<CatalogueProductDto>> {
     await this.validateSelections(query);
     // EXISTS filters retain one row per product, before pagination and counting.
-    const builder = this.productsRepository
-      .createQueryBuilder('product')
-      .select('product.id');
+    const builder = this.indicatorsQuery();
     if (query.origin)
       builder.andWhere('BTRIM(product.origin) IN (:...origin)', {
         origin: query.origin,
@@ -79,26 +118,21 @@ export class ProductsService {
         { minPrice: query.minPrice, maxPrice: query.maxPrice },
       );
     }
-    const [page, total] = await readStock(() =>
-      builder
-        .orderBy('product.name', 'ASC')
-        .addOrderBy('product.id', 'ASC')
-        .skip((query.page - 1) * query.limit)
-        .take(query.limit)
-        .getManyAndCount(),
-    );
-    if (!page.length) return new PaginatedResponseDto([], total, query);
+    const total = await readStock(() => builder.getCount());
 
-    const products = await readStock(() =>
-      this.productsRepository.find({
-        where: { id: In(page.map((product) => product.id)) },
-        relations: { ingredients: true, formats: true },
-        order: { name: 'ASC', id: 'ASC' },
-      }),
+    // Tri global avant la pagination ; l'UUID garantit un ordre total et stable entre les pages
+    for (const [column, direction, nulls] of SORT_ORDERS[query.sort])
+      builder.addOrderBy(column, direction, nulls);
+    const rows = await readStock(() =>
+      builder
+        .addOrderBy('product.id', 'ASC')
+        .offset((query.page - 1) * query.limit)
+        .limit(query.limit)
+        .getRawMany<IndicatorsRow>(),
     );
 
     return new PaginatedResponseDto(
-      products.map(toCatalogueProductDto),
+      await this.toCatalogueProducts(rows),
       total,
       query,
     );
@@ -185,19 +219,48 @@ export class ProductsService {
         ],
       ),
     );
+    if (!rows.length) return [];
     const ids = rows.map((row) => row.id);
 
+    const indicators = await readStock(() =>
+      this.indicatorsQuery()
+        .where('product.id IN (:...ids)', { ids })
+        .getRawMany<IndicatorsRow>(),
+    );
+
+    // la requête des indicateurs ne conserve pas l'ordre du score
+    return this.toCatalogueProducts(
+      indicators.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)),
+    );
+  }
+
+  // Une ligne par produit avec les indicateurs exposés et utilisés par les tris
+  private indicatorsQuery() {
+    return this.productsRepository
+      .createQueryBuilder('product')
+      .select('product.id', 'id')
+      .addSelect(LOWEST_PRICE_SQL, 'lowestPrice')
+      .addSelect(AVERAGE_RATING_SQL, 'averageRating')
+      .addSelect(RATING_COUNT_SQL, 'ratingCount')
+      .setParameter('reviewType', ProfileProductType.REVIEW);
+  }
+
+  // Charge les ingrédients des produits et conserve l'ordre des lignes reçues
+  private async toCatalogueProducts(
+    rows: IndicatorsRow[],
+  ): Promise<CatalogueProductDto[]> {
+    if (!rows.length) return [];
     const products = await readStock(() =>
       this.productsRepository.find({
-        where: { id: In(ids) },
+        where: { id: In(rows.map((row) => row.id)) },
         relations: { ingredients: true, formats: true },
       }),
     );
-
-    // `find` ne conserve pas l'ordre du score
-    return products
-      .sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id))
-      .map(toCatalogueProductDto);
+    const byId = new Map(products.map((product) => [product.id, product]));
+    return rows.flatMap((row) => {
+      const product = byId.get(row.id);
+      return product ? [toCatalogueProductDto(product, row)] : [];
+    });
   }
 
   private async validateSelections(query: CatalogueQueryDto) {
@@ -285,7 +348,10 @@ export class ProductsService {
   }
 }
 
-function toCatalogueProductDto(product: Product): CatalogueProductDto {
+function toCatalogueProductDto(
+  product: Product,
+  indicators: IndicatorsRow,
+): CatalogueProductDto {
   return {
     id: product.id,
     name: product.name,
@@ -295,6 +361,14 @@ function toCatalogueProductDto(product: Product): CatalogueProductDto {
     ingredients: product.ingredients.map((ingredient) => ingredient.name),
     moment: product.moment,
     image: product.image,
+    lowestPrice:
+      indicators.lowestPrice === null ? null : Number(indicators.lowestPrice),
+    // AVG renvoie un numeric (chaîne côté pg) : arrondi à une décimale pour l'affichage
+    averageRating:
+      indicators.averageRating === null
+        ? null
+        : Math.round(Number(indicators.averageRating) * 10) / 10,
+    ratingCount: Number(indicators.ratingCount),
   };
 }
 

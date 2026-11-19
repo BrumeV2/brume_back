@@ -27,8 +27,8 @@ Les paramètres de sélection acceptent une valeur simple ou un paramètre rép�
 - Filtre absent : aucune restriction sur ce critère.
 - Supprimer un filtre revient à retirer entièrement ce paramètre, pas à envoyer une chaîne vide.
 - Les deux bornes de prix doivent être respectées par **un même format**. Un produit avec des formats à 500 et 1500 centimes ne correspond pas à un intervalle de 700 à 1000.
-- La réponse conserve tous les ingrédients du produit. Elle ne contient ni prix ni formats : le prix n'existe que sur les formats, exposés par la fiche produit `GET /api/products/{id}`.
-- Les produits sont triés par nom puis UUID. Les filtres sont appliqués avant le comptage et la pagination ; un produit n'apparaît qu'une fois, quel que soit son nombre de formats ou d'ingrédients correspondants.
+- La réponse conserve tous les ingrédients du produit. Elle ne contient pas les formats (exposés par la fiche produit `GET /api/products/{id}`), seulement le prix du format le moins cher (`lowestPrice`), voir [CATALOGUE-SORT.md](CATALOGUE-SORT.md).
+- Le tri est choisi par `sort` (par défaut : nom puis UUID), voir [CATALOGUE-SORT.md](CATALOGUE-SORT.md). Les filtres sont appliqués avant le tri, le comptage et la pagination ; un produit n'apparaît qu'une fois, quel que soit son nombre de formats ou d'ingrédients correspondants.
 
 ## Exemples
 
@@ -103,7 +103,7 @@ Les requêtes utilisent des paramètres SQL liés. Les filtres relationnels sont
 
 ## Swagger et contrat
 
-Swagger : http://localhost:3000/api/docs. Le contrat partagé est mis à jour en version **1.2.0**, avec les six filtres, les choix et le format de réponse réel du catalogue. Les anciens paramètres théoriques `q`, `category`, `type`, `inStock`, `sort`, `minPriceCents` et `maxPriceCents` ne sont pas implémentés par cette story. Utiliser `minPrice` et `maxPrice`, conformément au périmètre retenu.
+Swagger : http://localhost:3000/api/docs. Le contrat partagé a été mis à jour en version **1.2.0** (puis 1.3.0 pour le tri, US-017), avec les six filtres, les choix et le format de réponse réel du catalogue. Les anciens paramètres théoriques `q`, `category`, `type`, `inStock`, `minPriceCents` et `maxPriceCents` ne sont pas implémentés par cette story. Utiliser `minPrice` et `maxPrice`, conformément au périmètre retenu.
 
 Le frontend consulté contient encore un ancien contrat généré ; il devra être régénéré dans son dépôt pour intégrer ces paramètres. Aucun fichier du frontend n'a été modifié.
 
