@@ -8,8 +8,16 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 
 describe('UsersService', () => {
   let service: UsersService;
-  let usersRepo: jest.Mocked<Partial<Repository<User>>>;
-  let profilesRepo: jest.Mocked<Partial<Repository<Profile>>>;
+  let usersRepo: {
+    findOne: jest.Mock<Repository<User>['findOne']>;
+    createQueryBuilder: Repository<User>['createQueryBuilder'];
+  };
+  let profilesRepo: {
+    findOneBy: jest.Mock<Repository<Profile>['findOneBy']>;
+    save: jest.Mock<(profile: Profile) => Promise<Profile>>;
+    create: jest.Mock<(attrs: Partial<Profile>) => Profile>;
+    createQueryBuilder: Repository<Profile>['createQueryBuilder'];
+  };
 
   const mockUser: User = {
     id: '11111111-1111-4111-8111-111111111111',
@@ -40,40 +48,40 @@ describe('UsersService', () => {
 
   beforeEach(() => {
     usersRepo = {
-      findOne: jest.fn(),
+      findOne: jest.fn<Repository<User>['findOne']>(),
       createQueryBuilder: jest.fn(() => ({
         insert: jest.fn().mockReturnThis(),
         values: jest.fn().mockReturnThis(),
         orIgnore: jest.fn().mockReturnThis(),
-        execute: jest.fn().mockResolvedValue({}),
+        execute: jest.fn<() => Promise<unknown>>().mockResolvedValue({}),
       })) as unknown as Repository<User>['createQueryBuilder'],
     };
 
     profilesRepo = {
-      findOneBy: jest.fn(),
-      save: jest.fn(),
-      create: jest.fn((attrs) => attrs as Profile),
+      findOneBy: jest.fn<Repository<Profile>['findOneBy']>(),
+      save: jest.fn<(profile: Profile) => Promise<Profile>>(),
+      create: jest.fn((attrs: Partial<Profile>) => attrs as Profile),
       createQueryBuilder: jest.fn(() => ({
         insert: jest.fn().mockReturnThis(),
         values: jest.fn().mockReturnThis(),
         orIgnore: jest.fn().mockReturnThis(),
-        execute: jest.fn().mockResolvedValue({}),
+        execute: jest.fn<() => Promise<unknown>>().mockResolvedValue({}),
       })) as unknown as Repository<Profile>['createQueryBuilder'],
     };
 
     service = new UsersService(
-      usersRepo as Repository<User>,
-      profilesRepo as Repository<Profile>,
+      usersRepo as unknown as Repository<User>,
+      profilesRepo as unknown as Repository<Profile>,
     );
   });
 
   describe('resolveGoogle', () => {
     it('initialise un profil avec prenom et nom lors de la premiere connexion Google', async () => {
-      (usersRepo.findOne as jest.Mock).mockResolvedValueOnce({
+      usersRepo.findOne.mockResolvedValueOnce({
         ...mockUser,
         profile: undefined,
       });
-      (profilesRepo.findOneBy as jest.Mock).mockResolvedValueOnce(mockProfile);
+      profilesRepo.findOneBy.mockResolvedValueOnce(mockProfile);
 
       const user = await service.resolveGoogle({
         sub: 'google-sub-123',
@@ -87,7 +95,7 @@ describe('UsersService', () => {
     });
 
     it('rejette si le compte est bloque', async () => {
-      (usersRepo.findOne as jest.Mock).mockResolvedValueOnce({
+      usersRepo.findOne.mockResolvedValueOnce({
         ...mockUser,
         status: AccountStatus.BLOCKED,
       });
@@ -105,7 +113,7 @@ describe('UsersService', () => {
 
   describe('getProfile', () => {
     it('renvoie les informations combinees de User et Profile', async () => {
-      (usersRepo.findOne as jest.Mock).mockResolvedValueOnce({
+      usersRepo.findOne.mockResolvedValueOnce({
         ...mockUser,
         profile: mockProfile,
       });
@@ -121,12 +129,12 @@ describe('UsersService', () => {
     });
 
     it('rejette si utilisateur inconnu ou bloque', async () => {
-      (usersRepo.findOne as jest.Mock).mockResolvedValueOnce(null);
+      usersRepo.findOne.mockResolvedValueOnce(null);
       await expect(service.getProfile('inconnu')).rejects.toThrow(
         UnauthorizedException,
       );
 
-      (usersRepo.findOne as jest.Mock).mockResolvedValueOnce({
+      usersRepo.findOne.mockResolvedValueOnce({
         ...mockUser,
         status: AccountStatus.BLOCKED,
       });
@@ -144,12 +152,12 @@ describe('UsersService', () => {
     });
 
     it('met a jour partiellement les champs autorises et persiste', async () => {
-      (usersRepo.findOne as jest.Mock).mockResolvedValueOnce({
+      usersRepo.findOne.mockResolvedValueOnce({
         ...mockUser,
         profile: { ...mockProfile },
       });
 
-      (profilesRepo.save as jest.Mock).mockImplementationOnce((p) =>
+      profilesRepo.save.mockImplementationOnce((p) =>
         Promise.resolve({ ...p, updatedAt: new Date() }),
       );
 
@@ -170,12 +178,12 @@ describe('UsersService', () => {
     });
 
     it('accepte null pour effacer le telephone ou l adresse', async () => {
-      (usersRepo.findOne as jest.Mock).mockResolvedValueOnce({
+      usersRepo.findOne.mockResolvedValueOnce({
         ...mockUser,
         profile: { ...mockProfile },
       });
 
-      (profilesRepo.save as jest.Mock).mockImplementationOnce((p) =>
+      profilesRepo.save.mockImplementationOnce((p) =>
         Promise.resolve({ ...p }),
       );
 
@@ -191,12 +199,12 @@ describe('UsersService', () => {
     });
 
     it('ne permet pas d alterer loyaltyPoints', async () => {
-      (usersRepo.findOne as jest.Mock).mockResolvedValueOnce({
+      usersRepo.findOne.mockResolvedValueOnce({
         ...mockUser,
         profile: { ...mockProfile, loyaltyPoints: 50 },
       });
 
-      (profilesRepo.save as jest.Mock).mockImplementationOnce((p) =>
+      profilesRepo.save.mockImplementationOnce((p) =>
         Promise.resolve({ ...p }),
       );
 

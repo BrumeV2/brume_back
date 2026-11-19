@@ -1,3 +1,8 @@
+import { AvailabilityService } from './availability/availability.service';
+import {
+  AvailabilityQueryDto,
+  FormatAvailabilityDto,
+} from './dto/availability.dto';
 import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
@@ -12,7 +17,10 @@ import { ProductsService } from './products.service';
 @ApiTags('products')
 @Controller('products')
 export class ProductsController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(
+    private readonly productsService: ProductsService,
+    private readonly availability: AvailabilityService,
+  ) {}
 
   @Public()
   @Get()
@@ -22,6 +30,11 @@ export class ProductsController {
     description: 'Paramètre ou valeur de filtre invalide.',
   })
   @ApiOkResponse({ type: CataloguePageDto })
+  @ApiResponse({
+    status: 503,
+    type: ApiErrorDto,
+    description: 'STOCK_UNAVAILABLE',
+  })
   findCatalogue(@Query() query: CatalogueQueryDto) {
     return this.productsService.findCatalogue(query);
   }
@@ -43,6 +56,11 @@ export class ProductsController {
   @ApiOkResponse({ type: ProductDetailDto })
   @ApiResponse({ status: 400, type: ApiErrorDto })
   @ApiResponse({ status: 404, type: ApiErrorDto })
+  @ApiResponse({
+    status: 503,
+    type: ApiErrorDto,
+    description: 'STOCK_UNAVAILABLE',
+  })
   findOne(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     return this.productsService.findOne(id);
   }
@@ -54,7 +72,31 @@ export class ProductsController {
   @ApiOkResponse({ type: CatalogueProductDto, isArray: true })
   @ApiResponse({ status: 400, type: ApiErrorDto })
   @ApiResponse({ status: 404, type: ApiErrorDto })
+  @ApiResponse({
+    status: 503,
+    type: ApiErrorDto,
+    description: 'STOCK_UNAVAILABLE',
+  })
   findSimilar(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     return this.productsService.findSimilar(id);
+  }
+  @Public()
+  @Get(':id/formats/:formatId/availability')
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiParam({ name: 'formatId', format: 'uuid' })
+  @ApiOkResponse({ type: FormatAvailabilityDto })
+  @ApiResponse({ status: 400, type: ApiErrorDto })
+  @ApiResponse({ status: 404, type: ApiErrorDto })
+  @ApiResponse({
+    status: 503,
+    type: ApiErrorDto,
+    description: 'STOCK_UNAVAILABLE : aucun accord de commandabilité possible.',
+  })
+  checkAvailability(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('formatId', new ParseUUIDPipe({ version: '4' })) formatId: string,
+    @Query() query: AvailabilityQueryDto,
+  ) {
+    return this.availability.check(id, formatId, query.quantity);
   }
 }

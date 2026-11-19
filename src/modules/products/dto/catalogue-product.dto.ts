@@ -1,7 +1,14 @@
+import { Availability } from '../availability/availability';
 import { ApiProperty } from '@nestjs/swagger';
 import { ConsumptionMoment } from '../enums/consumption-moment.enum';
 
 export class CatalogueProductDto {
+  @ApiProperty({ enum: Availability })
+  availability: Availability;
+  @ApiProperty({
+    description: 'Commandable pour une unité au moment de la consultation.',
+  })
+  isOrderable: boolean;
   @ApiProperty({ format: 'uuid' })
   id: string;
   @ApiProperty()

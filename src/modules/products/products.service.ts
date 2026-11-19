@@ -1,4 +1,11 @@
 import {
+  Availability,
+  availabilityOf,
+  isAvailable,
+  productAvailability,
+  readStock,
+} from './availability/availability';
+import {
   BadRequestException,
   Injectable,
   NotFoundException,
@@ -72,19 +79,23 @@ export class ProductsService {
         { minPrice: query.minPrice, maxPrice: query.maxPrice },
       );
     }
-    const [page, total] = await builder
-      .orderBy('product.name', 'ASC')
-      .addOrderBy('product.id', 'ASC')
-      .skip((query.page - 1) * query.limit)
-      .take(query.limit)
-      .getManyAndCount();
+    const [page, total] = await readStock(() =>
+      builder
+        .orderBy('product.name', 'ASC')
+        .addOrderBy('product.id', 'ASC')
+        .skip((query.page - 1) * query.limit)
+        .take(query.limit)
+        .getManyAndCount(),
+    );
     if (!page.length) return new PaginatedResponseDto([], total, query);
 
-    const products = await this.productsRepository.find({
-      where: { id: In(page.map((product) => product.id)) },
-      relations: { ingredients: true },
-      order: { name: 'ASC', id: 'ASC' },
-    });
+    const products = await readStock(() =>
+      this.productsRepository.find({
+        where: { id: In(page.map((product) => product.id)) },
+        relations: { ingredients: true, formats: true },
+        order: { name: 'ASC', id: 'ASC' },
+      }),
+    );
 
     return new PaginatedResponseDto(
       products.map(toCatalogueProductDto),
@@ -94,10 +105,12 @@ export class ProductsService {
   }
 
   async findOne(id: string): Promise<ProductDetailDto> {
-    const product = await this.productsRepository.findOne({
-      where: { id },
-      relations: { ingredients: true, formats: true },
-    });
+    const product = await readStock(() =>
+      this.productsRepository.findOne({
+        where: { id },
+        relations: { ingredients: true, formats: true },
+      }),
+    );
     if (!product) throw new NotFoundException();
 
     return {
@@ -122,6 +135,7 @@ export class ProductsService {
           description: ingredient.description,
           type: ingredient.type,
         })),
+      ...productAvailability(product.formats),
       formats: toFormatDtos(product.formats),
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
@@ -129,15 +143,16 @@ export class ProductsService {
   }
 
   async findSimilar(id: string): Promise<CatalogueProductDto[]> {
-    if (!(await this.productsRepository.existsBy({ id }))) {
+    if (!(await readStock(() => this.productsRepository.existsBy({ id })))) {
       throw new NotFoundException();
     }
 
     // Score = ingrédients communs hors base (la base recoupe le type de thé) + même type de thé.
     // Égalités départagées par le moment, puis la caféine, puis le nom.
     // Les produits sans aucun format en stock ne sont pas suggérés.
-    const rows: { id: string }[] = await this.productsRepository.query(
-      `SELECT candidate.id
+    const rows: { id: string }[] = await readStock(() =>
+      this.productsRepository.query(
+        `SELECT candidate.id
        FROM products candidate
        JOIN products target ON target.id = $1
        WHERE candidate.id <> target.id
@@ -161,20 +176,23 @@ export class ProductsService {
          candidate.name ASC,
          candidate.id ASC
        LIMIT $5`,
-      [
-        id,
-        SHARED_INGREDIENT_WEIGHT,
-        IngredientType.BASE,
-        SAME_TEA_TYPE_WEIGHT,
-        SIMILAR_PRODUCTS_COUNT,
-      ],
+        [
+          id,
+          SHARED_INGREDIENT_WEIGHT,
+          IngredientType.BASE,
+          SAME_TEA_TYPE_WEIGHT,
+          SIMILAR_PRODUCTS_COUNT,
+        ],
+      ),
     );
     const ids = rows.map((row) => row.id);
 
-    const products = await this.productsRepository.find({
-      where: { id: In(ids) },
-      relations: { ingredients: true },
-    });
+    const products = await readStock(() =>
+      this.productsRepository.find({
+        where: { id: In(ids) },
+        relations: { ingredients: true, formats: true },
+      }),
+    );
 
     // `find` ne conserve pas l'ordre du score
     return products
@@ -199,9 +217,11 @@ export class ProductsService {
             .where(`BTRIM(product.${field}) IN (:...values)`, { values });
         }
         const available = new Set(
-          (await builder.distinct(true).getRawMany<{ value: string }>()).map(
-            (row) => row.value,
-          ),
+          (
+            await readStock(() =>
+              builder.distinct(true).getRawMany<{ value: string }>(),
+            )
+          ).map((row) => row.value),
         );
         return values.every((value) => available.has(value))
           ? null
@@ -271,6 +291,7 @@ function toCatalogueProductDto(product: Product): CatalogueProductDto {
     name: product.name,
     typeTea: product.typeTea,
     origin: product.origin,
+    ...productAvailability(product.formats),
     ingredients: product.ingredients.map((ingredient) => ingredient.name),
     moment: product.moment,
     image: product.image,
@@ -286,6 +307,11 @@ function toFormatDtos(formats: ProductFormat[]): CatalogueFormatDto[] {
       packaging: format.packaging,
       quantity: format.quantity,
       price: format.price,
-      stock: format.stock,
+      stock:
+        availabilityOf(format.stock) === Availability.UNKNOWN
+          ? null
+          : format.stock,
+      availability: availabilityOf(format.stock),
+      isOrderable: isAvailable(availabilityOf(format.stock)),
     }));
 }

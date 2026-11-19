@@ -1,9 +1,17 @@
+import { ApiProperty } from '@nestjs/swagger';
+import { Availability } from '../availability/availability';
 import { CaffeineLevel } from '../enums/caffeine-level.enum';
 import { ConsumptionMoment } from '../enums/consumption-moment.enum';
 import { CatalogueFormatDto } from './catalogue-format.dto';
 import { ProductIngredientDto } from './product-ingredient.dto';
 
 export class ProductDetailDto {
+  @ApiProperty({ enum: Availability })
+  availability: Availability;
+  @ApiProperty({
+    description: 'Commandable pour une unité au moment de la consultation.',
+  })
+  isOrderable: boolean;
   id: string;
   name: string;
   description: string | null;

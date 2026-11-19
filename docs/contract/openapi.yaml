@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Brume API
-  version: 1.2.0
+  version: 1.3.0
   description: |
     Contrat d'API du MVP Brume (thé, café, CBD) — T-003.
 
@@ -233,6 +233,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CataloguePage' }
         '400': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/StockUnavailable' }
 
   /products/filters:
     get:
@@ -248,25 +249,69 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CatalogueFilters' }
 
-  /products/{slug}:
+  /products/{id}:
     get:
-      tags: [catalog]
+      tags: [products]
       operationId: getProduct
-      summary: Fiche produit et disponibilité (US-002, US-004)
+      summary: Fiche produit et disponibilité des formats (US-002, US-004)
       security: []
       parameters:
-        - name: slug
-          in: path
-          required: true
-          schema: { type: string }
-          example: earl-grey-imperial
+        - $ref: '#/components/parameters/IdPath'
       responses:
         '200':
-          description: Fiche
+          description: Fiche et disponibilités au moment de la lecture, sans réservation.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ProductDetail' }
+              schema: { $ref: '#/components/schemas/CatalogueProductDetail' }
+        '400': { $ref: '#/components/responses/ValidationError' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/StockUnavailable' }
+
+  /products/{id}/similar:
+    get:
+      tags: [products]
+      operationId: getSimilarProducts
+      summary: Produits similaires commandables
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Produits similaires avec disponibilité courante.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CatalogueProduct' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/StockUnavailable' }
+
+  /products/{id}/formats/{formatId}/availability:
+    get:
+      tags: [products]
+      operationId: checkFormatAvailability
+      summary: Contrôler si une quantité du format est commandable (US-004)
+      description: Relit le stock. Retourne 200 et isOrderable=false si le stock est insuffisant. Le format doit appartenir au produit. Ne réserve et ne décrémente aucun stock.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - name: formatId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: quantity
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 99, default: 1 }
+      responses:
+        '200':
+          description: Disponibilité du format et commandabilité de la quantité demandée.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FormatAvailability' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/StockUnavailable' }
 
   # ───────────────────────────── CART ─────────────────────────────
   /cart:
@@ -898,6 +943,11 @@ components:
       schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
 
   responses:
+    StockUnavailable:
+      description: '`STOCK_UNAVAILABLE` — stock non consultable ; aucun accord de commandabilité.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     AuthUnavailable:
       description: '`AUTH_UNAVAILABLE` — service indisponible, aucune donnée sensible.'
       content:
@@ -1025,6 +1075,7 @@ components:
             - AUTH_UNAVAILABLE
             - FORBIDDEN
             - NOT_FOUND
+            - STOCK_UNAVAILABLE
             - OUT_OF_STOCK
             - PRODUCT_UNAVAILABLE
             - PRICE_CHANGED
@@ -1171,17 +1222,21 @@ components:
 
     CatalogueFormat:
       type: object
-      required: [id, packaging, quantity, price, stock]
+      required: [id, packaging, quantity, price, stock, availability, isOrderable]
       properties:
         id: { type: string, format: uuid }
         packaging: { type: string, enum: [bag, box, tin] }
         quantity: { type: integer, description: Grammage }
         price: { type: integer, description: Centimes }
-        stock: { type: integer }
+        stock: { type: integer, nullable: true }
+        availability: { $ref: '#/components/schemas/Availability' }
+        isOrderable: { type: boolean, description: Commandable pour une unité }
     CatalogueProduct:
       type: object
-      required: [id, name, typeTea, origin, ingredients, moment, image]
+      required: [id, name, typeTea, origin, ingredients, moment, image, availability, isOrderable]
       properties:
+        availability: { $ref: '#/components/schemas/Availability' }
+        isOrderable: { type: boolean, description: Au moins un format commandable pour une unité }
         id: { type: string, format: uuid }
         name: { type: string }
         typeTea: { type: string, nullable: true }
@@ -1189,6 +1244,42 @@ components:
         ingredients: { type: array, items: { type: string } }
         moment: { type: string, enum: [morning, noon, snack, evening] }
         image: { type: string, nullable: true, description: Image encodée en base64 }
+    FormatAvailability:
+      type: object
+      required: [productId, formatId, quantity, availability, isOrderable]
+      properties:
+        productId: { type: string, format: uuid }
+        formatId: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1, maximum: 99 }
+        availability: { $ref: '#/components/schemas/Availability' }
+        isOrderable: { type: boolean, description: Toute la quantité demandée peut être commandée selon le stock courant }
+    CatalogueProductDetail:
+      type: object
+      required: [id, name, description, typeTea, origin, howMuchCaffeine, moment, image, ingredients, formats, availability, isOrderable, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        typeTea: { type: string, nullable: true }
+        origin: { type: string, nullable: true }
+        howMuchCaffeine: { type: string, enum: [none, low, medium, high] }
+        moment: { type: string, enum: [morning, noon, snack, evening] }
+        image: { type: string, nullable: true }
+        ingredients:
+          type: array
+          items:
+            type: object
+            required: [id, name, description, type]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              description: { type: string, nullable: true }
+              type: { type: string }
+        formats: { type: array, items: { $ref: '#/components/schemas/CatalogueFormat' } }
+        availability: { $ref: '#/components/schemas/Availability' }
+        isOrderable: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     CataloguePage:
       type: object
       required: [data, meta]
@@ -1231,8 +1322,8 @@ components:
       enum: [TEA, COFFEE, CBD, BOX, ADVENT_CALENDAR, ACCESSORY]
     Availability:
       type: string
-      description: '`IN_STOCK` (> 5), `LOW_STOCK` (1 à 5), `OUT_OF_STOCK` (0). La quantité exacte n''est pas publique.'
-      enum: [IN_STOCK, LOW_STOCK, OUT_OF_STOCK]
+      description: '`IN_STOCK` (> 5), `LOW_STOCK` (1 à 5), `OUT_OF_STOCK` (0 ou aucun format), `UNKNOWN` (stock invalide ou manquant). UNKNOWN interdit la commande pour le format concerné.'
+      enum: [IN_STOCK, LOW_STOCK, OUT_OF_STOCK, UNKNOWN]
     Image:
       type: object
       required: [url, alt]

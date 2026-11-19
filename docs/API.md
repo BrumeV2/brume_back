@@ -221,3 +221,10 @@ Ces règles sont vérifiées par des tests et ne doivent jamais être violées :
 `GET /products` accepte désormais `ingredients`, `origin`, `typeTea`, `howMuchCaffeine`, `moment`, `minPrice` et `maxPrice`, en plus de `page` et `limit`. Les sélections multiples utilisent des paramètres répétés (OU), les critères différents se combinent par ET. Les prix sont en centimes et doivent correspondre à un même format. `GET /products/filters` fournit les choix issus du catalogue complet.
 
 Exemples, règles et validation : [CATALOGUE-FILTERS.md](CATALOGUE-FILTERS.md). Cette section remplace les anciens paramètres de catalogue proposés dans le tableau de routes. Le contrat OpenAPI 1.2.0 décrit les paramètres réellement implémentés.
+
+
+## Disponibilité des références — US-004
+
+La disponibilité est calculée à partir du stock des formats de vente. Le catalogue et la fiche exposent `availability` et `isOrderable` pour une unité ; la fiche détaille chaque format. `GET /products/{id}/formats/{formatId}/availability?quantity=1` vérifie une quantité entre 1 et 99, sans réservation. En cas de stock non consultable, l’API retourne `503 STOCK_UNAVAILABLE`.
+
+Le contrôle strict `AvailabilityService.assertOrderable` est exporté pour les futures écritures de panier. Règles, états inconnus et limites : [PRODUCT-AVAILABILITY.md](PRODUCT-AVAILABILITY.md). Contrat OpenAPI 1.3.0.
