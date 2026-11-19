@@ -136,7 +136,7 @@ Le front se base sur `code`, qui est stable. `message` est un texte en français
 | **Back-office** | | | |
 | GET / POST | `/admin/categories` | ADMIN | — |
 | PATCH | `/admin/categories/{id}` | ADMIN | — |
-| GET / POST | `/admin/products` | ADMIN | 080 |
+| GET / POST | `/admin/products` | ADMIN | 080 — POST livré, voir [`PRODUCT-CREATION.md`](PRODUCT-CREATION.md) |
 | GET / PATCH | `/admin/products/{id}` | ADMIN | 081 |
 | POST | `/admin/products/{id}/archive` | ADMIN | 082 |
 | POST | `/admin/products/{id}/variants` | ADMIN | 080 |

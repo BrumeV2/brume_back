@@ -41,7 +41,8 @@ export class ApiExceptionFilter implements ExceptionFilter {
       code: safe?.code ?? code,
       message:
         safe?.code && typeof safe.message === 'string' ? safe.message : message,
-      ...(status === 400 &&
+      // 409 : conflit d'unicité exprimé comme une validation (contrat US-080)
+      ...((status === 400 || status === 409) &&
       safe?.code === 'VALIDATION_ERROR' &&
       Array.isArray(safe.details)
         ? { details: safe.details }

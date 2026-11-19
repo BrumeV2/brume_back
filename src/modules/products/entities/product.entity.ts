@@ -1,5 +1,15 @@
-import { Column, Entity, JoinTable, ManyToMany, OneToMany } from 'typeorm';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  JoinTable,
+  ManyToMany,
+  ManyToOne,
+  OneToMany,
+} from 'typeorm';
+import type { Relation } from 'typeorm';
 import { BaseEntity } from '../../../common/entities/base.entity';
+import { User } from '../../users/entities/user.entity';
 import { CaffeineLevel } from '../enums/caffeine-level.enum';
 import { ConsumptionMoment } from '../enums/consumption-moment.enum';
 import { Box } from './box.entity';
@@ -32,8 +42,20 @@ export class Product extends BaseEntity {
   moment: ConsumptionMoment;
 
   // un produit non publié n'apparaît sur aucune route publique (catalogue, fiche, similaires, choix de filtres)
+  // Défaut base à true pour les données antérieures ; l'API de création démarre en brouillon (false)
   @Column({ type: 'boolean', default: true })
   published: boolean;
+
+  // Audit : compte à l'origine de la création, null pour les données antérieures
+  @Column({ type: 'uuid', nullable: true })
+  createdById: string | null;
+
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({
+    name: 'createdById',
+    foreignKeyConstraintName: 'FK_products_created_by',
+  })
+  createdBy?: Relation<User> | null;
 
   // au moins 1 format : vérifié dans le service
   @OneToMany(() => ProductFormat, (format) => format.product, {

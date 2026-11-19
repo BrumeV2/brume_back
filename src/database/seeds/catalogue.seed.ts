@@ -905,11 +905,15 @@ async function seed() {
     const ingredientByName = new Map(savedIngredients.map((i) => [i.name, i]));
 
     const savedProducts = await manager.save(
-      products.map((data) =>
+      products.map((data, index) =>
         manager.create(Product, {
           ...data,
+          // Références déterministes : BR001-BAG-50
           formats: data.formats.map((format) =>
-            manager.create(ProductFormat, format),
+            manager.create(ProductFormat, {
+              ...format,
+              sku: `BR${String(index + 1).padStart(3, '0')}-${format.packaging.toUpperCase()}-${format.quantity}`,
+            }),
           ),
           image: placeholderImage(data.name, colorByTeaType[data.typeTea]),
           ingredients: data.ingredients.map((name) =>
