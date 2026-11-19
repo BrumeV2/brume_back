@@ -36,6 +36,7 @@ describe('CartController', () => {
       getCart: jest.fn<any>().mockResolvedValue(mockCartResponse),
       merge: jest.fn<any>().mockResolvedValue(mockCartResponse),
       updateItem: jest.fn<any>().mockResolvedValue(mockCartResponse),
+      removeItem: jest.fn<any>().mockResolvedValue(mockCartResponse),
     };
 
     sessionsService = {
@@ -178,6 +179,21 @@ describe('CartController', () => {
       'cart-session-123',
       '11111111-2222-3333-4444-555555555555',
       updateDto,
+    );
+  });
+
+  it('supprime une ligne de panier via DELETE /cart/items/:itemId', async () => {
+    const { req, res } = createMockReqRes('cart-session-123');
+
+    await controller.removeItem(
+      '11111111-2222-3333-4444-555555555555',
+      req,
+      res,
+    );
+
+    expect(cartService.removeItem).toHaveBeenCalledWith(
+      'cart-session-123',
+      '11111111-2222-3333-4444-555555555555',
     );
   });
 });

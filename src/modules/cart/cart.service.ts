@@ -198,6 +198,32 @@ export class CartService {
     return this.buildCartResponse(cart);
   }
 
+  async removeItem(cartId: string, itemId: string): Promise<CartResponseDto> {
+    const cart = this.getOrCreateCart(cartId);
+    const itemIndex = cart.items.findIndex((line) => line.id === itemId);
+
+    if (itemIndex === -1) {
+      this.logger.warn(
+        `Ligne introuvable ou non autorisee sur le panier ${cartId} : ${itemId}`,
+      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Ligne de panier introuvable.',
+      });
+    }
+
+    cart.items.splice(itemIndex, 1);
+    const now = new Date().toISOString();
+    cart.updatedAt = now;
+    this.cartCache.set(cart);
+
+    this.logger.log(
+      `Ligne ${itemId} retiree du panier ${cartId} (${cart.items.length} article(s) restant(s))`,
+    );
+
+    return this.buildCartResponse(cart);
+  }
+
   async merge(
     cartId: string,
     itemsToMerge: AddCartItemDto[],
