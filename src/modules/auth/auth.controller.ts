@@ -149,5 +149,6 @@ export class AuthController {
     );
     // Do not confirm logout or clear the cookie if persistence failed.
     response.clearCookie('brume_session', this.cookie('/api'));
+    response.clearCookie('brume_cart', { path: '/' });
   }
 }
