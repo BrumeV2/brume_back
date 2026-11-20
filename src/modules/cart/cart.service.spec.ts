@@ -12,6 +12,7 @@ import { ProductFormat } from '../products/entities/product-format.entity';
 import { Product } from '../products/entities/product.entity';
 import { Packaging } from '../products/enums/packaging.enum';
 import { CartCacheService } from './cart-cache.service';
+import { CartPricingService } from './cart-pricing.service';
 import { CartService } from './cart.service';
 
 describe('CartService', () => {
@@ -84,6 +85,7 @@ describe('CartService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CartService,
+        CartPricingService,
         { provide: CartCacheService, useValue: cacheService },
         { provide: getRepositoryToken(ProductFormat), useValue: formatRepo },
         { provide: getRepositoryToken(Box), useValue: boxRepo },
@@ -285,6 +287,194 @@ describe('CartService', () => {
       expect(rawLine.name).toBeUndefined();
       expect(rawLine.description).toBeUndefined();
       expect(rawLine.image).toBeUndefined();
+    });
+  });
+
+  describe('Modification de quantité (US-022)', () => {
+    it('augmente puis diminue rapidement une quantité et recalcule les montants', async () => {
+      const added = await service.addItem('cart-update', {
+        formatId: 'fmt-1',
+        quantity: 2,
+      });
+      const itemId = added.items[0].id;
+
+      // Augmentation à 5
+      const increased = await service.updateItem('cart-update', itemId, {
+        quantity: 5,
+      });
+      expect(increased.itemsCount).toBe(5);
+      expect(increased.items[0].quantity).toBe(5);
+      expect(increased.items[0].lineTotalCents).toBe(5 * 1290);
+      expect(increased.itemsTotalCents).toBe(5 * 1290);
+
+      // Diminution à 1
+      const decreased = await service.updateItem('cart-update', itemId, {
+        quantity: 1,
+      });
+      expect(decreased.itemsCount).toBe(1);
+      expect(decreased.items[0].quantity).toBe(1);
+      expect(decreased.items[0].lineTotalCents).toBe(1290);
+      expect(decreased.itemsTotalCents).toBe(1290);
+    });
+
+    it('rejette en 404 si la ligne n existe pas ou appartient à une autre session', async () => {
+      const added = await service.addItem('cart-owner-1', {
+        formatId: 'fmt-1',
+        quantity: 2,
+      });
+      const itemId = added.items[0].id;
+
+      // Tentative de modification de la ligne de cart-owner-1 depuis cart-owner-2
+      await expect(
+        service.updateItem('cart-owner-2', itemId, { quantity: 3 }),
+      ).rejects.toThrow(NotFoundException);
+
+      // Tentative avec un UUID inexistant
+      await expect(
+        service.updateItem(
+          'cart-owner-1',
+          '00000000-0000-0000-0000-000000000000',
+          {
+            quantity: 1,
+          },
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejette en 409 OUT_OF_STOCK si la quantité demandée dépasse le stock du format', async () => {
+      const added = await service.addItem('cart-stock-check', {
+        formatId: 'fmt-1',
+        quantity: 2,
+      });
+      const itemId = added.items[0].id;
+
+      // mockFormat a un stock de 10
+      await expect(
+        service.updateItem('cart-stock-check', itemId, { quantity: 15 }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('modifie la quantité d une box', async () => {
+      const added = await service.addItem('cart-box-update', {
+        boxId: 'box-1',
+        quantity: 1,
+      });
+      const itemId = added.items[0].id;
+
+      const updated = await service.updateItem('cart-box-update', itemId, {
+        quantity: 3,
+      });
+      expect(updated.itemsCount).toBe(3);
+      expect(updated.itemsTotalCents).toBe(3 * 3490);
+    });
+
+    it('modifie la quantité d une carte cadeau sans contrainte de stock physique', async () => {
+      const added = await service.addItem('cart-gc-update', {
+        giftCard: {
+          recipientEmail: 'ami@example.com',
+          senderName: 'Moi',
+          amount: 5000,
+        },
+        quantity: 1,
+      });
+      const itemId = added.items[0].id;
+
+      const updated = await service.updateItem('cart-gc-update', itemId, {
+        quantity: 4,
+      });
+      expect(updated.itemsCount).toBe(4);
+      expect(updated.itemsTotalCents).toBe(4 * 5000);
+    });
+  });
+
+  describe('Suppression idempotente d une ligne (US-023)', () => {
+    it('supprime une ligne puis la dernière ligne du panier avec recalcul exact des totaux', async () => {
+      // Panier initial avec 2 articles : un format et une box
+      await service.addItem('cart-remove-flow', {
+        formatId: 'fmt-1',
+        quantity: 2,
+      });
+      const secondAdd = await service.addItem('cart-remove-flow', {
+        boxId: 'box-1',
+        quantity: 1,
+      });
+
+      expect(secondAdd.itemsCount).toBe(3);
+      expect(secondAdd.itemsTotalCents).toBe(2 * 1290 + 3490);
+
+      const formatItemId = secondAdd.items[0].id;
+      const boxItemId = secondAdd.items[1].id;
+
+      // 1. Suppression de la première ligne
+      const afterFirstRemoval = await service.removeItem(
+        'cart-remove-flow',
+        formatItemId,
+      );
+      expect(afterFirstRemoval.itemsCount).toBe(1);
+      expect(afterFirstRemoval.items).toHaveLength(1);
+      expect(afterFirstRemoval.items[0].id).toBe(boxItemId);
+      expect(afterFirstRemoval.itemsTotalCents).toBe(3490);
+
+      // 2. Suppression de la dernière ligne restante
+      const afterLastRemoval = await service.removeItem(
+        'cart-remove-flow',
+        boxItemId,
+      );
+      expect(afterLastRemoval.itemsCount).toBe(0);
+      expect(afterLastRemoval.items).toHaveLength(0);
+      expect(afterLastRemoval.itemsTotalCents).toBe(0);
+    });
+
+    it('rejette une suppression répétée (idempotence avec code NOT_FOUND au second essai)', async () => {
+      const added = await service.addItem('cart-idempotent', {
+        formatId: 'fmt-1',
+        quantity: 1,
+      });
+      const itemId = added.items[0].id;
+
+      // Premier appel : suppression réussie
+      const firstRemoval = await service.removeItem('cart-idempotent', itemId);
+      expect(firstRemoval.items).toHaveLength(0);
+
+      // Deuxième appel : ligne déjà absente -> 404 NOT_FOUND
+      await expect(
+        service.removeItem('cart-idempotent', itemId),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejette la tentative de suppression d une ligne appartenant à un autre panier', async () => {
+      const addedCart1 = await service.addItem('cart-owner-alice', {
+        formatId: 'fmt-1',
+        quantity: 1,
+      });
+      const itemAliceId = addedCart1.items[0].id;
+
+      // Tentative de suppression depuis le panier de Bob
+      await expect(
+        service.removeItem('cart-owner-bob', itemAliceId),
+      ).rejects.toThrow(NotFoundException);
+
+      // Le panier d'Alice reste intact
+      const cartAlice = await service.getCart('cart-owner-alice');
+      expect(cartAlice.items).toHaveLength(1);
+      expect(cartAlice.items[0].id).toBe(itemAliceId);
+    });
+
+    it('supprime une ligne de carte cadeau', async () => {
+      const added = await service.addItem('cart-gc-remove', {
+        giftCard: {
+          recipientEmail: 'ami@example.com',
+          senderName: 'Moi',
+          amount: 5000,
+        },
+        quantity: 1,
+      });
+      const itemId = added.items[0].id;
+
+      const afterRemoval = await service.removeItem('cart-gc-remove', itemId);
+      expect(afterRemoval.itemsCount).toBe(0);
+      expect(afterRemoval.items).toHaveLength(0);
+      expect(afterRemoval.itemsTotalCents).toBe(0);
     });
   });
 });

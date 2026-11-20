@@ -23,6 +23,12 @@ import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { CaffeineLevel } from '../enums/caffeine-level.enum';
 import { CatalogueSort } from '../enums/catalogue-sort.enum';
 import { ConsumptionMoment } from '../enums/consumption-moment.enum';
+import { IngredientsMatch } from '../enums/ingredients-match.enum';
+import {
+  SEARCH_MAX_LENGTH,
+  SEARCH_MIN_LENGTH,
+  SearchText,
+} from './search-text';
 
 const Selection = (lowercase = false) =>
   Transform(({ value }: { value: unknown }) => {
@@ -57,11 +63,21 @@ class PriceRange implements ValidatorConstraintInterface {
 
 export class CatalogueQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
+    type: String,
+    minLength: SEARCH_MIN_LENGTH,
+    maxLength: SEARCH_MAX_LENGTH,
+    description:
+      'Recherche texte (US-014), valeur unique. Insensible à la casse et aux accents. Chaque mot doit figurer dans le nom, l’origine, le type de thé, le nom ou un synonyme d’un ingrédient (ET entre mots). Retirer le paramètre plutôt que l’envoyer vide.',
+  })
+  @SearchText()
+  q?: string;
+
+  @ApiPropertyOptional({
     type: [String],
     format: 'uuid',
     maxItems: 20,
     description:
-      'UUID des ingrédients liés au catalogue. Répéter le paramètre pour plusieurs valeurs (OU).',
+      'UUID d’ingrédients du référentiel (GET /ingredients). Répéter le paramètre pour plusieurs valeurs, combinées selon ingredientsMatch.',
   })
   @IsOptional()
   @Selection(true)
@@ -70,6 +86,16 @@ export class CatalogueQueryDto extends PaginationQueryDto {
   @ArrayMaxSize(20)
   @IsUUID('4', { each: true })
   ingredients?: string[];
+
+  @ApiPropertyOptional({
+    enum: IngredientsMatch,
+    default: IngredientsMatch.ANY,
+    description:
+      'Combinaison des ingrédients sélectionnés (US-015) : any = au moins un (OU), all = tous (ET). Sans effet sans ingredients.',
+  })
+  @IsOptional()
+  @IsEnum(IngredientsMatch)
+  ingredientsMatch: IngredientsMatch = IngredientsMatch.ANY;
 
   @ApiPropertyOptional({
     type: [String],

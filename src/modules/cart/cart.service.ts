@@ -12,9 +12,11 @@ import { Box } from '../products/entities/box.entity';
 import { ProductFormat } from '../products/entities/product-format.entity';
 import { Packaging } from '../products/enums/packaging.enum';
 import { CartCacheService } from './cart-cache.service';
+import { CartPricingService } from './cart-pricing.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { CartItemResponseDto } from './dto/cart-item-response.dto';
 import { CartResponseDto, CartWarningDto } from './dto/cart-response.dto';
+import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 import type {
   CartCache,
   CartLineCache,
@@ -41,6 +43,7 @@ export class CartService {
     @InjectRepository(Box)
     private readonly boxRepo: Repository<Box>,
     private readonly cartCache: CartCacheService,
+    private readonly pricingService: CartPricingService,
   ) {}
 
   getOrCreateCart(cartId: string): CartCache {
@@ -108,9 +111,119 @@ export class CartService {
 
   async getCart(cartId: string): Promise<CartResponseDto> {
     const cart = this.getOrCreateCart(cartId);
-    this.logger.debug(
-      `Consultation du panier ${cartId} (${cart.items.length} article(s))`,
+    const response = await this.buildCartResponse(cart);
+    this.logger.log(
+      `Consultation panier ${cartId} : ${response.itemsCount} article(s), total ${response.itemsTotalCents} centimes`,
     );
+    return response;
+  }
+
+  async updateItem(
+    cartId: string,
+    itemId: string,
+    dto: UpdateCartItemDto,
+  ): Promise<CartResponseDto> {
+    const cart = this.getOrCreateCart(cartId);
+    const item = cart.items.find((line) => line.id === itemId);
+
+    if (!item) {
+      this.logger.warn(
+        `Ligne introuvable ou non autorisee sur le panier ${cartId} : ${itemId}`,
+      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Ligne de panier introuvable.',
+      });
+    }
+
+    if (item.itemType === 'format') {
+      const format = await this.formatRepo.findOne({
+        where: { id: item.formatId },
+        relations: { product: true },
+      });
+
+      if (!format) {
+        throw new NotFoundException({
+          code: 'PRODUCT_FORMAT_NOT_FOUND',
+          message: 'Variante de produit introuvable.',
+        });
+      }
+
+      if (dto.quantity > format.stock) {
+        const sku =
+          format.product?.typeTea && format.quantity
+            ? `${format.product.typeTea.substring(0, 3).toUpperCase()}-${format.quantity}G`
+            : format.id;
+
+        this.logger.warn(
+          `Stock insuffisant lors de la modification de la ligne ${itemId} sur le panier ${cartId} : demande=${dto.quantity}, disponible=${format.stock}`,
+        );
+        throw new ConflictException({
+          code: 'OUT_OF_STOCK',
+          message: 'Stock insuffisant pour 1 article.',
+          details: [
+            {
+              variantId: format.id,
+              sku,
+              requested: dto.quantity,
+              available: format.stock,
+            },
+          ],
+        });
+      }
+
+      item.unitPrice = format.price;
+    } else if (item.itemType === 'box') {
+      const box = await this.boxRepo.findOne({
+        where: { id: item.boxId },
+      });
+
+      if (!box) {
+        throw new NotFoundException({
+          code: 'BOX_NOT_FOUND',
+          message: 'Coffret introuvable.',
+        });
+      }
+
+      item.unitPrice = box.price;
+    }
+
+    const now = new Date().toISOString();
+    item.quantity = dto.quantity;
+    item.updatedAt = now;
+    cart.updatedAt = now;
+    this.cartCache.set(cart);
+
+    this.logger.log(
+      `Quantite mise a jour pour la ligne ${itemId} sur le panier ${cartId} : ${dto.quantity}`,
+    );
+
+    return this.buildCartResponse(cart);
+  }
+
+  async removeItem(cartId: string, itemId: string): Promise<CartResponseDto> {
+    const cart = this.getOrCreateCart(cartId);
+    const itemIndex = cart.items.findIndex((line) => line.id === itemId);
+
+    if (itemIndex === -1) {
+      this.logger.warn(
+        `Ligne introuvable ou non autorisee sur le panier ${cartId} : ${itemId}`,
+      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Ligne de panier introuvable.',
+      });
+    }
+
+    cart.items.splice(itemIndex, 1);
+    const now = new Date().toISOString();
+    cart.updatedAt = now;
+    this.cartCache.set(cart);
+
+    this.logger.log(
+      `Ligne ${itemId} retiree du panier ${cartId} (${cart.items.length} article(s) restant(s))`,
+    );
+
     return this.buildCartResponse(cart);
   }
 
@@ -423,14 +536,20 @@ export class CartService {
       boxesMap = new Map(boxes.map((b) => [b.id, b]));
     }
 
-    let itemsTotalCents = 0;
-    let itemsCount = 0;
+    const totals = this.pricingService.calculateCartTotals(
+      cart.items.map((item) => ({
+        unitPriceCents: item.unitPrice,
+        quantity: item.quantity,
+      })),
+    );
+
     const warnings: CartWarningDto[] = [];
 
     const items: CartItemResponseDto[] = cart.items.map((item) => {
-      const lineTotalCents = item.quantity * item.unitPrice;
-      itemsTotalCents += lineTotalCents;
-      itemsCount += item.quantity;
+      const lineTotalCents = this.pricingService.calculateLineTotal(
+        item.unitPrice,
+        item.quantity,
+      );
 
       if (item.itemType === 'format' && item.formatId) {
         const format = formatsMap.get(item.formatId);
@@ -523,8 +642,8 @@ export class CartService {
     return {
       id: cart.id,
       items,
-      itemsCount,
-      itemsTotalCents,
+      itemsCount: totals.itemsCount,
+      itemsTotalCents: totals.itemsTotalCents,
       ageRestricted: false,
       warnings: [...warnings, ...extraWarnings],
       updatedAt: cart.updatedAt,

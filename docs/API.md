@@ -115,8 +115,9 @@ Le front se base sur `code`, qui est stable. `message` est un texte en français
 | PATCH / DELETE | `/users/me/addresses/{id}` | CUSTOMER | 048 (P1) |
 | **Catalogue** | | | |
 | GET | `/categories` | public | 003 |
-| GET | `/products` (`ingredients`, `origin`, `typeTea`, `howMuchCaffeine`, `moment`, `minPrice`, `maxPrice`, `page`, `limit`) | public | 001, 014, 016, 017 |
-| GET | `/products/{slug}` | public | 002, 004 |
+| GET | `/products` (`q`, `ingredients`, `ingredientsMatch`, `origin`, `typeTea`, `howMuchCaffeine`, `moment`, `minPrice`, `maxPrice`, `sort`, `page`, `limit`) | public | 001, 014, 015, 016, 017 |
+| GET | `/products/{id}` (UUID) | public | 002, 004 |
+| GET | `/ingredients` (`q`) | public | 015 |
 | **Panier** | | | |
 | GET / DELETE | `/cart` | CUSTOMER | 024 |
 | POST | `/cart/items` | CUSTOMER | 021 |
@@ -218,7 +219,7 @@ Ces règles sont vérifiées par des tests et ne doivent jamais être violées :
 
 ## Filtres du catalogue — US-016
 
-`GET /products` accepte désormais `ingredients`, `origin`, `typeTea`, `howMuchCaffeine`, `moment`, `minPrice` et `maxPrice`, en plus de `page` et `limit`. Les sélections multiples utilisent des paramètres répétés (OU), les critères différents se combinent par ET. Les prix sont en centimes et doivent correspondre à un même format. `GET /products/filters` fournit les choix issus du catalogue complet.
+`GET /products` accepte désormais `ingredients`, `origin`, `typeTea`, `howMuchCaffeine`, `moment`, `minPrice` et `maxPrice`, en plus de `page` et `limit`. Les sélections multiples utilisent des paramètres répétés (OU), les critères différents se combinent par ET. Les prix sont en centimes et doivent correspondre à un même format. `GET /products/filters` fournit les choix issus du catalogue complet. La recherche texte `q` (US-014) est décrite dans [CATALOGUE-SEARCH.md](CATALOGUE-SEARCH.md). La recherche par ingrédient (`GET /ingredients`, `ingredientsMatch`, synonymes, US-015) est décrite dans [CATALOGUE-INGREDIENTS.md](CATALOGUE-INGREDIENTS.md).
 
 Exemples, règles et validation : [CATALOGUE-FILTERS.md](CATALOGUE-FILTERS.md). Cette section remplace les anciens paramètres de catalogue proposés dans le tableau de routes. Le contrat OpenAPI 1.2.0 décrit les paramètres réellement implémentés.
 

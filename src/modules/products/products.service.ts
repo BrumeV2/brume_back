@@ -18,10 +18,13 @@ import { CatalogueFormatDto } from './dto/catalogue-format.dto';
 import { CatalogueQueryDto } from './dto/catalogue-query.dto';
 import { CatalogueProductDto } from './dto/catalogue-product.dto';
 import { ProductDetailDto } from './dto/product-detail.dto';
+import { Ingredient } from './entities/ingredient.entity';
 import { ProductFormat } from './entities/product-format.entity';
 import { Product } from './entities/product.entity';
 import { CaffeineLevel } from './enums/caffeine-level.enum';
 import { CatalogueSort } from './enums/catalogue-sort.enum';
+import { IngredientsMatch } from './enums/ingredients-match.enum';
+import { ingredientMatches, matches, searchPatterns } from './search';
 import { ProfileProductType } from './enums/profile-product-type.enum';
 import { ConsumptionMoment } from './enums/consumption-moment.enum';
 import { IngredientType } from './enums/ingredient-type.enum';
@@ -39,6 +42,23 @@ const LOWEST_PRICE_SQL = `(SELECT MIN(format.price) FROM product_formats format 
 // AVG et COUNT ignorent les avis sans note
 const AVERAGE_RATING_SQL = `(SELECT AVG(link.note) FROM profile_products link WHERE link."productId" = product.id AND link.type = :reviewType)`;
 const RATING_COUNT_SQL = `(SELECT COUNT(link.note) FROM profile_products link WHERE link."productId" = product.id AND link.type = :reviewType)`;
+
+// Recherche texte (US-014) : un mot est trouvé dans le nom, l'origine, le type de thé,
+// ou le nom ou un synonyme d'un ingrédient (US-015).
+const SEARCH_WORD_SQL = (param: string) =>
+  `(${[
+    matches('product.name', param),
+    matches('product.origin', param),
+    matches('product."typeTea"', param),
+    `EXISTS (SELECT 1 FROM product_ingredients pi JOIN ingredients ingredient ON ingredient.id = pi."ingredientId" WHERE pi."productId" = product.id AND ${ingredientMatches('ingredient', param)})`,
+  ].join(' OR ')})`;
+
+// Filtre ingrédients (US-016, US-015) : au moins un, ou tous les ingrédients sélectionnés.
+// La clé primaire (productId, ingredientId) et la déduplication du DTO rendent le comptage exact.
+const ANY_INGREDIENT_SQL =
+  'EXISTS (SELECT 1 FROM product_ingredients pi WHERE pi."productId" = product.id AND pi."ingredientId" IN (:...ingredients))';
+const ALL_INGREDIENTS_SQL =
+  '(SELECT COUNT(*) FROM product_ingredients pi WHERE pi."productId" = product.id AND pi."ingredientId" IN (:...ingredients)) = :ingredientCount';
 
 interface IndicatorsRow {
   id: string;
@@ -78,6 +98,8 @@ export class ProductsService {
   constructor(
     @InjectRepository(Product)
     private readonly productsRepository: Repository<Product>,
+    @InjectRepository(Ingredient)
+    private readonly ingredientsRepository: Repository<Ingredient>,
   ) {}
 
   async findCatalogue(
@@ -86,6 +108,13 @@ export class ProductsService {
     await this.validateSelections(query);
     // EXISTS filters retain one row per product, before pagination and counting.
     const builder = this.indicatorsQuery();
+    // ET entre les mots : chacun peut être trouvé dans un champ différent
+    if (query.q)
+      searchPatterns(query.q).forEach((pattern, index) =>
+        builder.andWhere(SEARCH_WORD_SQL(`search${index}`), {
+          [`search${index}`]: pattern,
+        }),
+      );
     if (query.origin)
       builder.andWhere('BTRIM(product.origin) IN (:...origin)', {
         origin: query.origin,
@@ -104,8 +133,13 @@ export class ProductsService {
       });
     if (query.ingredients)
       builder.andWhere(
-        'EXISTS (SELECT 1 FROM product_ingredients pi WHERE pi."productId" = product.id AND pi."ingredientId" IN (:...ingredients))',
-        { ingredients: query.ingredients },
+        query.ingredientsMatch === IngredientsMatch.ALL
+          ? ALL_INGREDIENTS_SQL
+          : ANY_INGREDIENT_SQL,
+        {
+          ingredients: query.ingredients,
+          ingredientCount: query.ingredients.length,
+        },
       );
     if (query.minPrice !== undefined || query.maxPrice !== undefined) {
       const bounds: string[] = [];
@@ -141,7 +175,7 @@ export class ProductsService {
   async findOne(id: string): Promise<ProductDetailDto> {
     const product = await readStock(() =>
       this.productsRepository.findOne({
-        where: { id },
+        where: { id, published: true },
         relations: { ingredients: true, formats: true },
       }),
     );
@@ -177,7 +211,11 @@ export class ProductsService {
   }
 
   async findSimilar(id: string): Promise<CatalogueProductDto[]> {
-    if (!(await readStock(() => this.productsRepository.existsBy({ id })))) {
+    if (
+      !(await readStock(() =>
+        this.productsRepository.existsBy({ id, published: true }),
+      ))
+    ) {
       throw new NotFoundException();
     }
 
@@ -190,6 +228,7 @@ export class ProductsService {
        FROM products candidate
        JOIN products target ON target.id = $1
        WHERE candidate.id <> target.id
+         AND candidate.published
          AND EXISTS (
            SELECT 1 FROM product_formats format
            WHERE format."productId" = candidate.id AND format.stock > 0
@@ -224,7 +263,7 @@ export class ProductsService {
 
     const indicators = await readStock(() =>
       this.indicatorsQuery()
-        .where('product.id IN (:...ids)', { ids })
+        .andWhere('product.id IN (:...ids)', { ids })
         .getRawMany<IndicatorsRow>(),
     );
 
@@ -234,15 +273,21 @@ export class ProductsService {
     );
   }
 
-  // Une ligne par produit avec les indicateurs exposés et utilisés par les tris
+  // Une ligne par produit publié avec les indicateurs exposés et utilisés par les tris
   private indicatorsQuery() {
-    return this.productsRepository
-      .createQueryBuilder('product')
+    return this.publishedProducts()
       .select('product.id', 'id')
       .addSelect(LOWEST_PRICE_SQL, 'lowestPrice')
       .addSelect(AVERAGE_RATING_SQL, 'averageRating')
       .addSelect(RATING_COUNT_SQL, 'ratingCount')
       .setParameter('reviewType', ProfileProductType.REVIEW);
+  }
+
+  // Point d'entrée de toutes les lectures publiques en query builder
+  private publishedProducts() {
+    return this.productsRepository
+      .createQueryBuilder('product')
+      .where('product.published = true');
   }
 
   // Charge les ingrédients des produits et conserve l'ordre des lignes reçues
@@ -268,17 +313,19 @@ export class ProductsService {
       (['origin', 'typeTea', 'ingredients'] as const).map(async (field) => {
         const values = query[field];
         if (!values) return null;
-        const builder = this.productsRepository.createQueryBuilder('product');
-        if (field === 'ingredients') {
-          builder
-            .innerJoin('product.ingredients', 'ingredient')
-            .select('ingredient.id', 'value')
-            .where('ingredient.id IN (:...values)', { values });
-        } else {
-          builder
-            .select(`BTRIM(product.${field})`, 'value')
-            .where(`BTRIM(product.${field}) IN (:...values)`, { values });
-        }
+        // Un ingrédient doit exister dans le référentiel, même sans produit (résultat vide, US-015).
+        // Une origine ou un type de thé doit figurer sur un produit publié.
+        const builder =
+          field === 'ingredients'
+            ? this.ingredientsRepository
+                .createQueryBuilder('ingredient')
+                .select('ingredient.id', 'value')
+                .where('ingredient.id IN (:...values)', { values })
+            : this.publishedProducts()
+                .select(`BTRIM(product.${field})`, 'value')
+                .andWhere(`BTRIM(product.${field}) IN (:...values)`, {
+                  values,
+                });
         const available = new Set(
           (
             await readStock(() =>
@@ -303,8 +350,7 @@ export class ProductsService {
 
   async filters(): Promise<CatalogueFiltersDto> {
     const [values, ingredients, price] = await Promise.all([
-      this.productsRepository
-        .createQueryBuilder('product')
+      this.publishedProducts()
         .select([
           `array_remove(array_agg(DISTINCT NULLIF(BTRIM(product.origin), '')), NULL) AS origin`,
           `array_remove(array_agg(DISTINCT NULLIF(BTRIM(product.typeTea), '')), NULL) AS "typeTea"`,
@@ -317,8 +363,7 @@ export class ProductsService {
           caffeine: string[] | null;
           moment: string[] | null;
         }>(),
-      this.productsRepository
-        .createQueryBuilder('product')
+      this.publishedProducts()
         .innerJoin('product.ingredients', 'ingredient')
         .select('ingredient.id', 'id')
         .addSelect('ingredient.name', 'name')
@@ -326,8 +371,7 @@ export class ProductsService {
         .orderBy('ingredient.name', 'ASC')
         .addOrderBy('ingredient.id', 'ASC')
         .getRawMany<{ id: string; name: string }>(),
-      this.productsRepository
-        .createQueryBuilder('product')
+      this.publishedProducts()
         .innerJoin('product.formats', 'format')
         .select('MIN(format.price)', 'min')
         .addSelect('MAX(format.price)', 'max')

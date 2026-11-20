@@ -672,13 +672,18 @@ paths:
     get:
       tags: [products]
       operationId: listProducts
-      summary: Catalogue paginé avec filtres combinés et tri (US-016, US-017)
-      description: ET entre filtres, OU entre valeurs d'un filtre. Prix appliqué à un format existant, pas au seul prix minimum affiché. Tous les formats du produit restent retournés. Tri global via sort (défaut name_asc), stable par nom puis UUID. Les valeurs origin, typeTea et ingredients doivent être présentes dans le catalogue complet.
+      summary: Catalogue paginé avec recherche, filtres combinés et tri (US-014, US-016, US-017)
+      description: Seuls les produits publiés sont retournés. Recherche q combinée aux filtres par un ET. ET entre filtres, OU entre valeurs d'un filtre (ingrédients selon ingredientsMatch). Prix appliqué à un format existant, pas au seul prix minimum affiché. Tous les formats du produit restent retournés. Tri global via sort (défaut name_asc), stable par nom puis UUID. Les valeurs origin et typeTea doivent être présentes dans le catalogue publié, les ingredients dans le référentiel.
       security: []
       parameters:
+        - name: q
+          in: query
+          description: "Recherche texte (US-014), valeur unique. Espaces de début et de fin retirés, espaces multiples réduits. Insensible à la casse et aux accents. Chaque mot (ET) doit figurer, en sous-chaîne, dans le nom, l'origine, le type de thé, ou le nom ou un synonyme d'un ingrédient. Pas de tri par pertinence : l'ordre suit sort. Paramètre absent : aucune restriction ; vide ou d'un seul caractère : 400."
+          schema: { type: string, minLength: 2, maxLength: 100 }
+          example: thé vert
         - name: ingredients
           in: query
-          description: 'Identifiants des ingrédients liés au catalogue. Répéter le paramètre pour plusieurs valeurs (OU).'
+          description: "Identifiants d'ingrédients du référentiel (GET /ingredients). Répéter le paramètre pour plusieurs valeurs, combinées selon ingredientsMatch. Un ingrédient du référentiel présent dans aucun produit publié donne une liste vide ; un UUID absent du référentiel donne 400 isAllowed."
           style: form
           explode: true
           schema:
@@ -686,6 +691,13 @@ paths:
             minItems: 1
             maxItems: 20
             items: { type: string, format: uuid }
+        - name: ingredientsMatch
+          in: query
+          description: "Combinaison des ingrédients sélectionnés (US-015) : any = au moins un (OU), all = tous (ET). Valeur unique. Sans effet sans ingredients."
+          schema:
+            type: string
+            enum: [any, all]
+            default: any
         - name: origin
           in: query
           description: 'Origines exactes présentes dans le catalogue. Répéter le paramètre pour plusieurs valeurs (OU).'
@@ -749,6 +761,30 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CataloguePage' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/StockUnavailable' }
+
+  /ingredients:
+    get:
+      tags: [products]
+      operationId: listIngredients
+      summary: Référentiel des ingrédients et recherche par nom ou synonyme (US-015)
+      description: "Public. Tout le référentiel, y compris les ingrédients présents dans aucun produit publié (productCount = 0), trié par nom puis UUID. Pas de pagination. q : chaque mot (ET) doit figurer, en sous-chaîne, dans le nom ou un synonyme, sans tenir compte de la casse ni des accents. L'UUID retourné s'utilise dans le paramètre ingredients de GET /products."
+      security: []
+      parameters:
+        - name: q
+          in: query
+          description: "Recherche dans le nom et les synonymes, valeur unique. Espaces de début et de fin retirés, espaces multiples réduits. Paramètre absent : tout le référentiel ; vide ou d'un seul caractère : 400."
+          schema: { type: string, minLength: 2, maxLength: 100 }
+          example: badiane
+      responses:
+        '200':
+          description: 'Ingrédients correspondants. Aucune correspondance : liste vide.'
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IngredientListItem' }
         '400': { $ref: '#/components/responses/ValidationError' }
         '503': { $ref: '#/components/responses/StockUnavailable' }
 
@@ -2035,6 +2071,15 @@ components:
             limit: { type: integer }
             total: { type: integer }
             totalPages: { type: integer }
+    IngredientListItem:
+      type: object
+      required: [id, name, type, aliases, productCount]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Anis étoilé }
+        type: { type: string, enum: [base, dried_ingredient, liquid_flavoring, essential_oil] }
+        aliases: { type: array, items: { type: string }, example: [badiane], description: Synonymes reconnus par les recherches }
+        productCount: { type: integer, minimum: 0, description: "Nombre de produits publiés contenant l'ingrédient. 0 : le filtre renverra une liste vide." }
     CatalogueFilters:
       type: object
       required: [ingredients, origin, typeTea, howMuchCaffeine, moment, price]
