@@ -56,6 +56,14 @@ export class GiftCardInputDto {
 
 export class AddCartItemDto {
   @ApiPropertyOptional({
+    description: 'Type d article (optionnel : format, box, gift_card)',
+    example: 'format',
+  })
+  @IsOptional()
+  @IsString()
+  itemType?: string;
+
+  @ApiPropertyOptional({
     description:
       'Identifiant UUID de la référence/format de produit (thé/infusion)',
     example: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
@@ -110,4 +118,13 @@ export class AddCartItemDto {
   @IsInt()
   @Min(0)
   unitPrice?: number;
+
+  @ApiPropertyOptional({
+    description: 'Alias pour unitPrice en centimes',
+    example: 1200,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  unitPriceCents?: number;
 }

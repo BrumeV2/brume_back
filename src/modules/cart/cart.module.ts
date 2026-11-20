@@ -7,11 +7,22 @@ import { CartCacheService } from './cart-cache.service';
 import { CartController } from './cart.controller';
 import { CartPricingService } from './cart-pricing.service';
 import { CartService } from './cart.service';
+import { CheckoutContextService } from './checkout-context.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([ProductFormat, Box]), AuthModule],
   controllers: [CartController],
-  providers: [CartService, CartCacheService, CartPricingService],
-  exports: [CartService, CartCacheService, CartPricingService],
+  providers: [
+    CartService,
+    CartCacheService,
+    CartPricingService,
+    CheckoutContextService,
+  ],
+  exports: [
+    CartService,
+    CartCacheService,
+    CartPricingService,
+    CheckoutContextService,
+  ],
 })
 export class CartModule {}

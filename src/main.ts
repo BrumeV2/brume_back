@@ -22,6 +22,11 @@ async function bootstrap() {
       { type: 'apiKey', in: 'cookie' },
       'sessionCookie',
     )
+    .addCookieAuth('brume_cart', { type: 'apiKey', in: 'cookie' }, 'cartCookie')
+    .addApiKey(
+      { type: 'apiKey', name: 'X-CSRF-Protection', in: 'header' },
+      'csrfHeader',
+    )
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, document, {
