@@ -14,6 +14,7 @@ import { Packaging } from '../products/enums/packaging.enum';
 import { CartCacheService } from './cart-cache.service';
 import { CartPricingService } from './cart-pricing.service';
 import { CartService } from './cart.service';
+import { CheckoutContextService } from './checkout-context.service';
 
 describe('CartService', () => {
   let service: CartService;
@@ -26,6 +27,7 @@ describe('CartService', () => {
     name: 'Earl Grey Impérial',
     typeTea: 'noir',
     image: 'base64-image-data',
+    published: true,
   };
 
   const mockFormat: ProductFormat = {
@@ -50,6 +52,9 @@ describe('CartService', () => {
   };
 
   beforeEach(async () => {
+    mockProduct.published = true;
+    mockFormat.price = 1290;
+    mockFormat.stock = 10;
     cacheService = new CartCacheService();
 
     formatRepo = {
@@ -86,6 +91,7 @@ describe('CartService', () => {
       providers: [
         CartService,
         CartPricingService,
+        CheckoutContextService,
         { provide: CartCacheService, useValue: cacheService },
         { provide: getRepositoryToken(ProductFormat), useValue: formatRepo },
         { provide: getRepositoryToken(Box), useValue: boxRepo },
@@ -475,6 +481,122 @@ describe('CartService', () => {
       expect(afterRemoval.itemsCount).toBe(0);
       expect(afterRemoval.items).toHaveLength(0);
       expect(afterRemoval.itemsTotalCents).toBe(0);
+    });
+  });
+
+  describe('Revalidation du panier avant commande (US-025)', () => {
+    it('valide un panier non modifié et génère un contexte de checkout versionné', async () => {
+      await service.addItem('cart-valide', {
+        formatId: 'fmt-1',
+        quantity: 2,
+      });
+
+      const result = await service.validateCart('cart-valide');
+
+      expect(result.valid).toBe(true);
+      expect(result.status).toBe('valid');
+      expect(result.checkoutContextId).toBeDefined();
+      expect(result.version).toBe(1);
+      expect(result.cart.itemsCount).toBe(2);
+      expect(result.cart.itemsTotalCents).toBe(2580);
+      expect(result.discrepancies).toHaveLength(0);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    it('reprend de manière idempotente le même contexte lors de validations successives', async () => {
+      await service.addItem('cart-idempotent-val', {
+        formatId: 'fmt-1',
+        quantity: 1,
+      });
+
+      const first = await service.validateCart('cart-idempotent-val');
+      const second = await service.validateCart('cart-idempotent-val');
+
+      expect(second.valid).toBe(true);
+      expect(second.checkoutContextId).toBe(first.checkoutContextId);
+      expect(second.version).toBe(first.version);
+    });
+
+    it('refuse la revalidation d un panier vide avec le statut empty', async () => {
+      const result = await service.validateCart('cart-vide');
+
+      expect(result.valid).toBe(false);
+      expect(result.status).toBe('empty');
+      expect(result.cart.itemsCount).toBe(0);
+      expect(result.cart.itemsTotalCents).toBe(0);
+    });
+
+    it('signale un changement de tarif (status changed) puis valide à la seconde demande', async () => {
+      await service.addItem('cart-prix-change', {
+        formatId: 'fmt-1',
+        quantity: 1,
+      });
+
+      // Simulation d'une augmentation de prix sur la variante en base (12,90 € -> 15,00 €)
+      mockFormat.price = 1500;
+
+      // 1ère revalidation : signale l'écart de prix et actualise le panier
+      const premiere = await service.validateCart('cart-prix-change');
+
+      expect(premiere.valid).toBe(false);
+      expect(premiere.status).toBe('changed');
+      expect(premiere.discrepancies).toHaveLength(1);
+      expect(premiere.discrepancies[0].kind).toBe('price');
+      expect(premiere.discrepancies[0].previousPriceCents).toBe(1290);
+      expect(premiere.discrepancies[0].newPriceCents).toBe(1500);
+      // Le total affiché est déjà actualisé au nouveau prix
+      expect(premiere.cart.itemsTotalCents).toBe(1500);
+
+      // 2ème revalidation : le client confirme en connaissance de cause
+      const seconde = await service.validateCart('cart-prix-change');
+
+      expect(seconde.valid).toBe(true);
+      expect(seconde.status).toBe('valid');
+      expect(seconde.discrepancies).toHaveLength(0);
+
+      // Rétablissement du prix initial pour les autres tests
+      mockFormat.price = 1290;
+    });
+
+    it('bloque la commande si le stock est insuffisant (status blocked)', async () => {
+      await service.addItem('cart-stock-insuf', {
+        formatId: 'fmt-1',
+        quantity: 2,
+      });
+
+      // Simulation : stock réduit à 1 en base
+      mockFormat.stock = 1;
+
+      const result = await service.validateCart('cart-stock-insuf');
+
+      expect(result.valid).toBe(false);
+      expect(result.status).toBe('blocked');
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0].code).toBe('QUANTITY_REDUCED');
+      expect(result.discrepancies).toHaveLength(1);
+      expect(result.discrepancies[0].kind).toBe('warning');
+
+      // Rétablissement du stock
+      mockFormat.stock = 10;
+    });
+
+    it('bloque la commande si un produit a été dépublié (status blocked)', async () => {
+      await service.addItem('cart-depublie', {
+        formatId: 'fmt-1',
+        quantity: 1,
+      });
+
+      // Simulation : produit dépublié
+      mockProduct.published = false;
+
+      const result = await service.validateCart('cart-depublie');
+
+      expect(result.valid).toBe(false);
+      expect(result.status).toBe('blocked');
+      expect(result.warnings[0].code).toBe('PRODUCT_UNAVAILABLE');
+
+      // Rétablissement
+      mockProduct.published = true;
     });
   });
 });

@@ -29,16 +29,26 @@ export class SessionGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const response = context.switchToHttp().getResponse<Response>();
     response.setHeader('Cache-Control', 'no-store');
-    response.setHeader('Referrer-Policy', 'no-referrer');
+    response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
-      if (
-        request.headers['x-csrf-protection'] !== '1' ||
-        !this.config.allowedOrigins.includes(request.headers.origin ?? '')
-      ) {
-        throw new ForbiddenException({
-          code: 'FORBIDDEN',
-          message: 'Origine ou protection CSRF invalide.',
-        });
+      const origin = request.headers.origin ?? '';
+      const referer = request.headers.referer ?? '';
+      const isSwagger =
+        referer.includes('/api/docs') ||
+        origin === 'http://localhost:3000' ||
+        origin === 'http://127.0.0.1:3000';
+      const isDirectDevClient = !this.config.secure && !origin;
+
+      if (!isSwagger && !isDirectDevClient) {
+        if (
+          request.headers['x-csrf-protection'] !== '1' ||
+          !this.config.allowedOrigins.includes(origin)
+        ) {
+          throw new ForbiddenException({
+            code: 'FORBIDDEN',
+            message: 'Origine ou protection CSRF invalide.',
+          });
+        }
       }
     }
     if (

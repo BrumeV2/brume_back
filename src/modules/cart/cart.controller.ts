@@ -4,6 +4,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Logger,
   Param,
   ParseUUIDPipe,
@@ -12,7 +14,13 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { ApiErrorDto } from '../../common/dto/api-error.dto';
@@ -22,6 +30,7 @@ import { SessionsService } from '../auth/sessions.service';
 import { CartService } from './cart.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { CartResponseDto } from './dto/cart-response.dto';
+import { CartValidationResponseDto } from './dto/cart-validation-response.dto';
 import { MergeCartDto } from './dto/merge-cart.dto';
 import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 
@@ -44,6 +53,37 @@ export class CartController {
   @ApiOperation({
     summary:
       'Ajouter une référence au panier avec validation de prix et disponibilité',
+  })
+  @ApiBody({
+    type: AddCartItemDto,
+    examples: {
+      format: {
+        summary: 'Ajout d un format de thé / infusion (recommandé)',
+        value: {
+          variantId: '0519ba12-bdf4-4bee-91c7-900c82916d59',
+          quantity: 2,
+        },
+      },
+      box: {
+        summary: 'Ajout d un coffret (Box)',
+        value: {
+          boxId: '7efa8bf0-e093-4473-9150-9197566cb8bb',
+          quantity: 1,
+        },
+      },
+      giftCard: {
+        summary: 'Ajout d une carte cadeau',
+        value: {
+          giftCard: {
+            amount: 5000,
+            from: 'Camille',
+            to: 'Dominique',
+            message: 'Bonne dégustation !',
+          },
+          quantity: 1,
+        },
+      },
+    },
   })
   @ApiResponse({
     status: 201,
@@ -85,6 +125,15 @@ export class CartController {
     type: String,
     format: 'uuid',
     description: 'Identifiant de la ligne du panier',
+  })
+  @ApiBody({
+    type: UpdateCartItemDto,
+    examples: {
+      default: {
+        summary: 'Nouvelle quantité souhaitée',
+        value: { quantity: 3 },
+      },
+    },
   })
   @ApiResponse({
     status: 200,
@@ -171,6 +220,27 @@ export class CartController {
       `Reception POST /cart/merge pour la session ${cartId} (${dto.items?.length ?? 0} article(s))`,
     );
     return this.cartService.merge(cartId, dto.items ?? []);
+  }
+
+  @Post('validate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Revalider le panier avant commande (US-025)',
+    description:
+      'Contrôle références, tarifs, quantités et disponibilité en direct. Génère ou reprend de manière idempotente un contexte de checkout versionné.',
+  })
+  @ApiResponse({
+    status: 200,
+    type: CartValidationResponseDto,
+    description: 'Résultat de la revalidation du panier.',
+  })
+  async validateCart(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<CartValidationResponseDto> {
+    const cartId = await this.resolveCartId(req, res);
+    this.logger.log(`Reception POST /cart/validate pour la session ${cartId}`);
+    return this.cartService.validateCart(cartId);
   }
 
   @Get()

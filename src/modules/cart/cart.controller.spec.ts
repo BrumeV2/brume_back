@@ -37,6 +37,15 @@ describe('CartController', () => {
       merge: jest.fn<any>().mockResolvedValue(mockCartResponse),
       updateItem: jest.fn<any>().mockResolvedValue(mockCartResponse),
       removeItem: jest.fn<any>().mockResolvedValue(mockCartResponse),
+      validateCart: jest.fn<any>().mockResolvedValue({
+        valid: true,
+        status: 'valid',
+        checkoutContextId: 'ctx-1',
+        version: 1,
+        cart: mockCartResponse,
+        discrepancies: [],
+        warnings: [],
+      }),
     };
 
     sessionsService = {
@@ -195,5 +204,15 @@ describe('CartController', () => {
       'cart-session-123',
       '11111111-2222-3333-4444-555555555555',
     );
+  });
+
+  it('revalide le panier avant commande via POST /cart/validate', async () => {
+    const { req, res } = createMockReqRes('cart-session-123');
+
+    const result = await controller.validateCart(req, res);
+
+    expect(cartService.validateCart).toHaveBeenCalledWith('cart-session-123');
+    expect(result.valid).toBe(true);
+    expect(result.status).toBe('valid');
   });
 });

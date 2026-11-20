@@ -13,14 +13,20 @@ import { ProductFormat } from '../products/entities/product-format.entity';
 import { Packaging } from '../products/enums/packaging.enum';
 import { CartCacheService } from './cart-cache.service';
 import { CartPricingService } from './cart-pricing.service';
+import { CheckoutContextService } from './checkout-context.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { CartItemResponseDto } from './dto/cart-item-response.dto';
 import { CartResponseDto, CartWarningDto } from './dto/cart-response.dto';
+import {
+  CartDiscrepancyDto,
+  CartValidationResponseDto,
+} from './dto/cart-validation-response.dto';
 import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 import type {
   CartCache,
   CartLineCache,
 } from './interfaces/cart-cache.interface';
+import { CheckoutContext } from './interfaces/checkout-context.interface';
 
 const DEFAULT_CART_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 jours
 
@@ -31,6 +37,11 @@ function slugify(text: string): string {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)+/g, '');
+}
+
+function formatPriceEuros(cents: number): string {
+  const euros = (cents / 100).toFixed(2).replace('.', ',');
+  return `${euros.endsWith(',00') ? Math.round(cents / 100) : euros} €`;
 }
 
 @Injectable()
@@ -44,6 +55,7 @@ export class CartService {
     private readonly boxRepo: Repository<Box>,
     private readonly cartCache: CartCacheService,
     private readonly pricingService: CartPricingService,
+    private readonly checkoutContextService: CheckoutContextService,
   ) {}
 
   getOrCreateCart(cartId: string): CartCache {
@@ -66,6 +78,7 @@ export class CartService {
 
   async addItem(cartId: string, dto: AddCartItemDto): Promise<CartResponseDto> {
     const formatTargetId = dto.formatId ?? dto.variantId;
+    const effectiveUnitPrice = dto.unitPrice ?? dto.unitPriceCents;
     const targetsCount = [
       Boolean(formatTargetId),
       Boolean(dto.boxId),
@@ -93,19 +106,24 @@ export class CartService {
         cartId,
         formatTargetId,
         dto.quantity,
-        dto.unitPrice,
+        effectiveUnitPrice,
       );
     }
 
     if (dto.boxId) {
-      return this.addBoxItem(cartId, dto.boxId, dto.quantity, dto.unitPrice);
+      return this.addBoxItem(
+        cartId,
+        dto.boxId,
+        dto.quantity,
+        effectiveUnitPrice,
+      );
     }
 
     return this.addGiftCardItem(
       cartId,
       dto.giftCard!,
       dto.quantity,
-      dto.unitPrice,
+      effectiveUnitPrice,
     );
   }
 
@@ -116,6 +134,187 @@ export class CartService {
       `Consultation panier ${cartId} : ${response.itemsCount} article(s), total ${response.itemsTotalCents} centimes`,
     );
     return response;
+  }
+
+  async validateCart(cartId: string): Promise<CartValidationResponseDto> {
+    const cart = this.getOrCreateCart(cartId);
+    this.logger.log(`Demande de revalidation du panier ${cartId} (US-025)`);
+
+    // 1. Panier vide
+    if (cart.items.length === 0) {
+      const response = await this.buildCartResponse(cart);
+      const context = this.checkoutContextService.createOrUpdateContext({
+        cartId,
+        status: 'empty',
+        itemsCount: 0,
+        itemsTotalCents: 0,
+        items: [],
+        warnings: [],
+        discrepancies: [],
+      });
+
+      this.logger.warn(`Revalidation refusee : le panier ${cartId} est vide`);
+      return {
+        valid: false,
+        status: 'empty',
+        checkoutContextId: context.id,
+        version: context.version,
+        cart: response,
+        discrepancies: [],
+        warnings: [],
+      };
+    }
+
+    const discrepancies: CartDiscrepancyDto[] = [];
+    const warnings: CartWarningDto[] = [];
+    let cartModified = false;
+
+    // 2. Contrôle des références, tarifs, quantités et disponibilité en direct
+    for (const item of cart.items) {
+      if (item.itemType === 'format' && item.formatId) {
+        const format = await this.formatRepo.findOne({
+          where: { id: item.formatId },
+          relations: { product: true },
+        });
+
+        if (!format || (format.product && format.product.published === false)) {
+          const sku = format
+            ? `PF-${format.packaging.toUpperCase()}-${format.quantity}G`
+            : item.formatId;
+          const message = `Un produit de ton panier n est plus disponible.`;
+          discrepancies.push({ kind: 'removed', message, sku });
+          warnings.push({ code: 'PRODUCT_UNAVAILABLE', sku, message });
+          continue;
+        }
+
+        const sku =
+          format.product?.typeTea && format.quantity
+            ? `${format.product.typeTea.substring(0, 3).toUpperCase()}-${format.quantity}G`
+            : `PF-${format.packaging.toUpperCase()}-${format.quantity}G`;
+
+        // Contrôle du tarif
+        if (item.unitPrice !== format.price) {
+          const prevEuros = formatPriceEuros(item.unitPrice);
+          const newEuros = formatPriceEuros(format.price);
+          const productName = format.product?.name ?? 'Le produit';
+          const message = `Le prix de ${productName} est passé de ${prevEuros} à ${newEuros}.`;
+
+          discrepancies.push({
+            kind: 'price',
+            message,
+            previousPriceCents: item.unitPrice,
+            newPriceCents: format.price,
+            sku,
+          });
+
+          // Mise à jour du prix sur le panier
+          item.unitPrice = format.price;
+          cartModified = true;
+        }
+
+        // Contrôle de la disponibilité et du stock
+        if (item.quantity > format.stock) {
+          const message =
+            format.stock > 0
+              ? `Il ne reste que ${format.stock} exemplaires de ce format.`
+              : `Le produit ${format.product?.name ?? ''} est en rupture de stock.`;
+
+          discrepancies.push({
+            kind: 'warning',
+            message,
+            sku,
+          });
+          warnings.push({
+            code: format.stock > 0 ? 'QUANTITY_REDUCED' : 'OUT_OF_STOCK',
+            sku,
+            message,
+          });
+        }
+      } else if (item.itemType === 'box' && item.boxId) {
+        const box = await this.boxRepo.findOne({
+          where: { id: item.boxId },
+        });
+
+        if (!box) {
+          const sku = item.boxId;
+          const message = `Le coffret n est plus disponible.`;
+          discrepancies.push({ kind: 'removed', message, sku });
+          warnings.push({ code: 'PRODUCT_UNAVAILABLE', sku, message });
+          continue;
+        }
+
+        const sku = `BOX-${slugify(box.name).toUpperCase()}`;
+
+        if (item.unitPrice !== box.price) {
+          const prevEuros = formatPriceEuros(item.unitPrice);
+          const newEuros = formatPriceEuros(box.price);
+          const message = `Le prix de ${box.name} est passé de ${prevEuros} à ${newEuros}.`;
+
+          discrepancies.push({
+            kind: 'price',
+            message,
+            previousPriceCents: item.unitPrice,
+            newPriceCents: box.price,
+            sku,
+          });
+
+          item.unitPrice = box.price;
+          cartModified = true;
+        }
+      }
+    }
+
+    if (cartModified) {
+      cart.updatedAt = new Date().toISOString();
+      this.cartCache.set(cart);
+    }
+
+    const cartResponse = await this.buildCartResponse(cart, warnings);
+
+    // 3. Détermination du statut
+    let status: 'valid' | 'changed' | 'blocked' = 'valid';
+    let valid = true;
+
+    const hasBlockingIssue =
+      warnings.length > 0 ||
+      discrepancies.some((d) => d.kind === 'warning' || d.kind === 'removed');
+
+    if (hasBlockingIssue) {
+      status = 'blocked';
+      valid = false;
+    } else if (discrepancies.some((d) => d.kind === 'price')) {
+      status = 'changed';
+      valid = false;
+    }
+
+    // 4. Création ou reprise idempotente du contexte de checkout versionné
+    const context = this.checkoutContextService.createOrUpdateContext({
+      cartId,
+      status,
+      itemsCount: cartResponse.itemsCount,
+      itemsTotalCents: cartResponse.itemsTotalCents,
+      items: cartResponse.items,
+      warnings,
+      discrepancies,
+    });
+
+    this.logger.log(
+      `Revalidation panier ${cartId} : statut=${status}, valid=${valid}, version=${context.version}, contexte=${context.id}`,
+    );
+
+    return {
+      valid,
+      status,
+      checkoutContextId: context.id,
+      version: context.version,
+      cart: cartResponse,
+      discrepancies,
+      warnings,
+    };
+  }
+
+  getCheckoutContext(cartId: string): CheckoutContext | null {
+    return this.checkoutContextService.getByCartId(cartId);
   }
 
   async updateItem(
