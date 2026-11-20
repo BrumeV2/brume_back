@@ -1,3 +1,7 @@
+import { MailModule } from '../mail/mail.module';
+import { AccountToken } from './entities/account-token.entity';
+import { PasswordAuthController } from './password-auth.controller';
+import { PasswordAuthService } from './password-auth.service';
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -15,12 +19,19 @@ import { SessionsService } from './sessions.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Session, OAuthTransaction, AuthRateLimit]),
+    TypeOrmModule.forFeature([
+      Session,
+      OAuthTransaction,
+      AuthRateLimit,
+      AccountToken,
+    ]),
     UsersModule,
+    MailModule,
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, PasswordAuthController],
   providers: [
     AuthConfig,
+    PasswordAuthService,
     AuthService,
     SessionsService,
     AuthThrottleGuard,

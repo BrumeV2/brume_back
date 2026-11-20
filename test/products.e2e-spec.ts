@@ -1,3 +1,7 @@
+import { AddGenericEmailKind1795120000000 } from '../src/database/migrations/1795120000000-AddGenericEmailKind';
+import { CreateEmailNotificationsAndPasswordAccounts1795100000000 } from '../src/database/migrations/1795100000000-CreateEmailNotificationsAndPasswordAccounts';
+import { AccountToken } from '../src/modules/auth/entities/account-token.entity';
+import { Mail } from '../src/modules/mail/entities/mail.entity';
 import { Availability } from '../src/modules/products/availability/availability';
 import { jest } from '@jest/globals';
 import { AvailabilityService } from '../src/modules/products/availability/availability.service';
@@ -81,6 +85,8 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
           password: process.env.TEST_DB_PASSWORD ?? 'change-me',
           database,
           entities: [
+            AccountToken,
+            Mail,
             User,
             Session,
             OAuthTransaction,
@@ -93,6 +99,8 @@ describe('Catalogue produits (PostgreSQL + HTTP)', () => {
             ProfileProduct,
           ],
           migrations: [
+            AddGenericEmailKind1795120000000,
+            CreateEmailNotificationsAndPasswordAccounts1795100000000,
             CreateGoogleAccountsAndSessions1793109589589,
             CreateCatalogue1793272229451,
             ReplaceAddressesWithProfiles1793280000000,

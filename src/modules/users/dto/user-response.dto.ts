@@ -48,8 +48,8 @@ export class UserResponseDto {
   @ApiProperty({ enum: AccountStatus })
   status!: AccountStatus;
 
-  @ApiProperty({ format: 'date-time' })
-  emailVerifiedAt!: Date;
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  emailVerifiedAt!: Date | null;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;

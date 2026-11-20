@@ -16,5 +16,6 @@ export class ApiErrorDto {
   @ApiProperty() code!: string;
   @ApiProperty() message!: string;
   @ApiProperty() path!: string;
+  @ApiProperty({ format: 'uuid' }) requestId!: string;
   @ApiProperty({ format: 'date-time' }) timestamp!: string;
 }

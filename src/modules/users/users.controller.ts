@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Patch } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiCookieAuth,
   ApiHeader,
   ApiOkResponse,
@@ -15,6 +16,7 @@ import { UserResponseDto } from './dto/user-response.dto';
 
 @ApiTags('users')
 @ApiCookieAuth('sessionCookie')
+@ApiBearerAuth('accessToken')
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}

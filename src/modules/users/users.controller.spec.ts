@@ -11,6 +11,7 @@ describe('UsersController', () => {
   let service: jest.Mocked<Partial<UsersService>>;
 
   const mockUser: User = {
+    passwordHash: null,
     id: '11111111-1111-4111-8111-111111111111',
     googleSub: 'google-sub-123',
     email: 'test@example.com',

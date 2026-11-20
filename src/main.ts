@@ -4,6 +4,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { configureApp } from './app.setup';
 import { AppConfig } from './config';
+import { swaggerRequestInterceptor, swaggerUiDocument } from './swagger.setup';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -16,17 +17,30 @@ async function bootstrap() {
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Brume API')
     .setDescription('API e-commerce Brume : thé, café et CBD')
-    .setVersion('1.3.0')
+    .setVersion('1.5.0')
     .addCookieAuth(
       'brume_session',
       { type: 'apiKey', in: 'cookie' },
       'sessionCookie',
     )
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'Opaque',
+        description: 'Access token retourné par POST /auth/login.',
+      },
+      'accessToken',
+    )
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, document, {
     jsonDocumentUrl: 'api/docs-json',
-    swaggerOptions: { persistAuthorization: true },
+    swaggerOptions: {
+      persistAuthorization: true,
+      spec: swaggerUiDocument(document),
+      requestInterceptor: swaggerRequestInterceptor,
+    },
   });
 
   await app.listen(appConfig.port);

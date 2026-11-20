@@ -1,3 +1,7 @@
+import { AddGenericEmailKind1795120000000 } from '../src/database/migrations/1795120000000-AddGenericEmailKind';
+import { CreateEmailNotificationsAndPasswordAccounts1795100000000 } from '../src/database/migrations/1795100000000-CreateEmailNotificationsAndPasswordAccounts';
+import { AccountToken } from '../src/modules/auth/entities/account-token.entity';
+import { Mail } from '../src/modules/mail/entities/mail.entity';
 import { Profile } from '../src/modules/users/entities/profile.entity';
 import { ReplaceAddressesWithProfiles1793280000000 } from '../src/database/migrations/1793280000000-ReplaceAddressesWithProfiles';
 import { jest } from '@jest/globals';
@@ -140,8 +144,18 @@ describe('Google accounts, sessions and profile (PostgreSQL + HTTP)', () => {
           username: process.env.TEST_DB_USER ?? 'brume',
           password: process.env.TEST_DB_PASSWORD ?? 'change-me',
           database,
-          entities: [User, Session, OAuthTransaction, AuthRateLimit, Profile],
+          entities: [
+            AccountToken,
+            Mail,
+            User,
+            Session,
+            OAuthTransaction,
+            AuthRateLimit,
+            Profile,
+          ],
           migrations: [
+            AddGenericEmailKind1795120000000,
+            CreateEmailNotificationsAndPasswordAccounts1795100000000,
             CreateGoogleAccountsAndSessions1793109589589,
             ReplaceAddressesWithProfiles1793280000000,
           ],
@@ -192,6 +206,10 @@ describe('Google accounts, sessions and profile (PostgreSQL + HTTP)', () => {
           'brume_session',
           { type: 'apiKey', in: 'cookie' },
           'sessionCookie',
+        )
+        .addBearerAuth(
+          { type: 'http', scheme: 'bearer', bearerFormat: 'Opaque' },
+          'accessToken',
         )
         .build(),
     );

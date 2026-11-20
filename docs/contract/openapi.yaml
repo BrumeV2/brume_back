@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Brume API
-  version: 1.3.0
+  version: 1.5.0
   description: |
     Contrat d'API du MVP Brume (thé, café, CBD) — T-003.
 
@@ -17,6 +17,7 @@ servers:
   - url: http://localhost:4010
     description: Mock Prism (sert les routes sans le préfixe /api)
 tags:
+  - name: mail
   - name: health
   - name: auth
   - name: users
@@ -30,9 +31,497 @@ tags:
   - name: admin-orders
 
 security:
+  - accessToken: []
   - sessionCookie: []
 
 paths:
+  /auth/register:
+    post:
+      tags:
+        - auth
+      operationId: register
+      summary: Inscription ; réponse générique pour une adresse existante.
+      security: []
+      parameters: &a1
+        - &a2
+          name: Origin
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uri
+        - &a3
+          name: X-CSRF-Protection
+          in: header
+          required: true
+          schema:
+            type: string
+            enum:
+              - "1"
+      responses:
+        "202":
+          description: Inscription ; réponse générique pour une adresse existante.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - message
+                properties:
+                  message:
+                    type: string
+        "400":
+          description: VALIDATION_ERROR ou INVALID_TOKEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: AUTH_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+  /auth/login:
+    post:
+      tags:
+        - auth
+      operationId: login
+      summary: Connexion ; adresse confirmée requise.
+      security: []
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uri
+        - name: X-CSRF-Protection
+          in: header
+          required: true
+          schema:
+            type: string
+            enum:
+              - "1"
+      responses:
+        "200":
+          description: Session créée, cookie HttpOnly et access token révocable.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessTokenResponse"
+        "400":
+          description: VALIDATION_ERROR ou INVALID_TOKEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: "INVALID_CREDENTIALS : email ou mot de passe incorrect."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: EMAIL_NOT_CONFIRMED, ACCOUNT_BLOCKED ou CSRF_INVALID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: AUTH_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+  /auth/forgot-password:
+    post:
+      tags:
+        - auth
+      operationId: forgotPassword
+      summary: Réponse générique, y compris compte inconnu ou Google seul.
+      security: []
+      parameters: *a1
+      responses:
+        "202":
+          description: Réponse générique, y compris compte inconnu ou Google seul.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - message
+                properties:
+                  message:
+                    type: string
+        "400":
+          description: VALIDATION_ERROR ou INVALID_TOKEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: AUTH_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailRequest"
+  /auth/reset-password:
+    post:
+      tags:
+        - auth
+      operationId: resetPassword
+      summary: Mot de passe remplacé, jeton consommé et sessions révoquées.
+      security: []
+      parameters: *a1
+      responses:
+        "204":
+          description: Mot de passe remplacé, jeton consommé et sessions révoquées.
+        "400":
+          description: VALIDATION_ERROR ou INVALID_TOKEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: AUTH_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+  /auth/confirm-email:
+    post:
+      tags:
+        - auth
+      operationId: confirmEmail
+      summary: Adresse email confirmée et jeton consommé.
+      security: []
+      parameters: *a1
+      responses:
+        "204":
+          description: Adresse email confirmée et jeton consommé.
+        "400":
+          description: VALIDATION_ERROR ou INVALID_TOKEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: AUTH_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountTokenRequest"
+  /auth/resend-confirmation:
+    post:
+      tags:
+        - auth
+      operationId: resendConfirmation
+      summary: Réponse générique ; ancien lien remplacé si applicable.
+      security: []
+      parameters: *a1
+      responses:
+        "202":
+          description: Réponse générique ; ancien lien remplacé si applicable.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - message
+                properties:
+                  message:
+                    type: string
+        "400":
+          description: VALIDATION_ERROR ou INVALID_TOKEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: AUTH_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailRequest"
+  /admin/mails:
+    post:
+      tags:
+        - mail
+      operationId: sendMail
+      summary: Mettre un email Brume en file via Mailjet, réservé au rôle ADMIN.
+      description: Réponse 202 avec UUID et état de la demande durable. La même
+        eventKey ne crée pas de second envoi. Les erreurs Mailjet ultérieures sont
+        consultables dans l’historique.
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uri
+        - name: X-CSRF-Protection
+          in: header
+          required: true
+          schema:
+            type: string
+            enum:
+              - "1"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMailRequest"
+      responses:
+        "202":
+          description: Demande mise en file ou demande existante pour le même événement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mail"
+        "400":
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: UNAUTHENTICATED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: AUTH_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    get:
+      tags:
+        - mail
+      operationId: listMails
+      summary: Historique des envois, rôle ADMIN.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Page des envois, aucun payload exposé.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                  - total
+                  - page
+                  - limit
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Mail"
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+        "400":
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: UNAUTHENTICATED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: AUTH_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /admin/mails/{id}/retry:
+    post:
+      tags:
+        - mail
+      operationId: retryMail
+      summary: Reprise d’un échec certain sur le même événement, rôle ADMIN.
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+        - *a2
+        - *a3
+      responses:
+        "201":
+          description: Demande remise en attente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mail"
+        "400":
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: UNAUTHENTICATED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "CONFLICT : état non reprenable, notamment sent, sending ou uncertain"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: AUTH_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /health:
     get:
       tags: [health]
@@ -90,22 +579,43 @@ paths:
 
   /auth/logout:
     post:
-      tags: [auth]
+      tags:
+        - auth
       operationId: logout
       summary: Révoquer uniquement la session courante (ADD-087)
-      description: Exige Origin autorisée et X-CSRF-Protection à 1. Idempotent pour une session absente ou déjà révoquée. Aucun 204 si la révocation en base échoue.
+      description: "Révoque le jeton Bearer explicite, sinon la session cookie. Cookie
+        : Origin et X-CSRF-Protection requis ; Bearer : authentification vérifiée
+        avant exemption CSRF. Un Bearer invalide ne retombe jamais sur le cookie."
       security:
+        - accessToken: []
         - sessionCookie: []
       parameters:
-        - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
-        - { name: X-CSRF-Protection, in: header, required: true, schema: { type: string, enum: ['1'] } }
+        - name: Origin
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uri
+        - name: X-CSRF-Protection
+          in: header
+          required: true
+          schema:
+            type: string
+            enum:
+              - "1"
       responses:
-        '204':
+        "204":
           description: Session révoquée ou déjà absente, cookie effacé.
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '503': { $ref: '#/components/responses/AuthUnavailable' }
-
-  # ───────────────────────────── USERS ─────────────────────────────
+        "401":
+          description: "UNAUTHENTICATED : Bearer invalide, révoqué ou expiré."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
   /users/me:
     get:
       tags: [users]
@@ -927,7 +1437,16 @@ components:
       type: apiKey
       in: cookie
       name: brume_session
-      description: Session opaque HttpOnly, Secure en production, SameSite=Lax. Expiration absolue configurable (24 h par défaut). Toute mutation exige une Origin autorisée et X-CSRF-Protection à 1.
+      description: "Session opaque HttpOnly, Secure en production, SameSite=Lax. Les
+        mutations via cookie exigent une Origin autorisée et X-CSRF-Protection:
+        1."
+    accessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: Opaque
+      description: Jeton retourné par POST /auth/login, stocké haché en base,
+        révocable et soumis à AUTH_SESSION_TTL_SECONDS. Aucun rôle ni secret
+        embarqué.
 
   headers:
     SetSessionCookie:
@@ -1067,16 +1586,229 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    AccessTokenResponse:
+      type: object
+      required:
+        - accessToken
+        - tokenType
+        - expiresIn
+      properties:
+        accessToken:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{43}$
+          description: "Jeton opaque révocable ; utiliser Authorization: Bearer <accessToken>."
+        tokenType:
+          type: string
+          enum:
+            - Bearer
+        expiresIn:
+          type: integer
+          minimum: 1
+          example: 86400
+          description: Durée de validité en secondes.
+    SendMailRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - to
+        - eventKey
+        - subject
+        - content
+      properties:
+        to:
+          type: string
+          format: email
+          maxLength: 254
+          example: client@example.com
+        eventKey:
+          type: string
+          minLength: 1
+          maxLength: 192
+          example: demo:message-001
+          description: Identifiant stable pour un même événement et destinataire.
+        subject:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Un mot de Brume
+        content:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          example: |-
+            Bonjour,
+
+            Votre demande a bien été reçue.
+          description: Texte uniquement ; le HTML est échappé.
+        title:
+          type: string
+          minLength: 1
+          maxLength: 300
+          example: Prenons le temps.
+        preheader:
+          type: string
+          minLength: 1
+          maxLength: 300
+          example: Votre demande est entre de bonnes mains.
+        action:
+          $ref: "#/components/schemas/MailAction"
+    MailAction:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - url
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Voir mon compte
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          example: https://brume.example/compte
+          format: uri
+          description: URL HTTP(S) absolue sans identifiants ni espaces.
+    EmailRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+      properties:
+        email: &a1
+          type: string
+          format: email
+          maxLength: 254
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - password
+      properties:
+        email: *a1
+        password: &a3
+          type: string
+          minLength: 8
+          maxLength: 128
+          description: Au moins une majuscule, un chiffre et un caractère spécial (ponctuation ou symbole).
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - password
+      properties:
+        email: *a1
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+    AccountTokenRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+      properties:
+        token: &a2
+          type: string
+          pattern: ^[A-Za-z0-9_-]{43}$
+    ResetPasswordRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - password
+      properties:
+        token: *a2
+        password: *a3
+    Mail:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - eventKey
+        - kind
+        - recipient
+        - status
+        - attempts
+        - createdAt
+        - updatedAt
+        - nextAttemptAt
+        - lastError
+        - providerId
+        - sentAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        eventKey:
+          type: string
+        kind:
+          type: string
+          enum:
+            - order.confirmed
+            - account.confirm
+            - account.reset
+            - email.generic
+        recipient: *a1
+        status:
+          type: string
+          enum:
+            - pending
+            - sending
+            - retry
+            - sent
+            - failed
+            - uncertain
+            - cancelled
+        attempts:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        nextAttemptAt:
+          type: string
+          format: date-time
+        lastError:
+          type: string
+          nullable: true
+        providerId:
+          type: string
+          nullable: true
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
     # ── transverses ──
     Error:
       type: object
-      required: [statusCode, code, message, path, timestamp]
+      required: [statusCode, code, message, path, timestamp, requestId]
       properties:
+        requestId: { type: string, format: uuid, description: Identifiant de corrélation des logs ; aussi envoyé dans X-Request-ID. }
         statusCode: { type: integer, example: 409 }
         code:
           type: string
           enum:
             - VALIDATION_ERROR
+            - INVALID_CREDENTIALS
+            - EMAIL_NOT_CONFIRMED
+            - ACCOUNT_BLOCKED
+            - CSRF_INVALID
+            - ADMIN_REQUIRED
+            - INVALID_TOKEN
+            - MAIL_CONFIGURATION_MISSING
+            - MAIL_NOT_FOUND
+            - MAIL_RETRY_NOT_ALLOWED
+            - MAIL_UNAVAILABLE
+            - SERVICE_UNAVAILABLE
+            - CONFLICT
             - WEBHOOK_SIGNATURE_INVALID
             - UNAUTHENTICATED
             - AUTH_UNAVAILABLE
@@ -1148,7 +1880,7 @@ components:
         doNewsletter: { type: boolean, example: false, description: Inscription newsletter }
         role: { $ref: '#/components/schemas/Role' }
         status: { type: string, enum: [ACTIVE, BLOCKED] }
-        emailVerifiedAt: { type: string, format: date-time }
+        emailVerifiedAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     UpdateProfileRequest:

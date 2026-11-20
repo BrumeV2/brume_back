@@ -26,6 +26,7 @@
     "migration:show": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:show",
     "migration:run:prod": "node node_modules/typeorm/cli.js -d dist/database/data-source.js migration:run",
     "migration:show:prod": "node node_modules/typeorm/cli.js -d dist/database/data-source.js migration:show",
+    "email:preview": "ts-node scripts/preview-emails.ts",
     "seed": "ts-node src/database/seeds/catalogue.seed.ts",
     "seed:reviews": "ts-node src/database/seeds/reviews.seed.ts"
   },
