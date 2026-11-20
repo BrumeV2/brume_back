@@ -9,8 +9,9 @@ import type { Request, Response } from 'express';
 import { IS_PUBLIC } from '../../common/decorators/public.decorator';
 import type { User } from '../users/entities/user.entity';
 import { AuthConfig } from './auth.config';
-import { readCookie } from './crypto.util';
+import { readBearerToken, readCookie } from './crypto.util';
 import { SessionsService } from './sessions.service';
+import { authenticationFailed } from '../users/users.service';
 
 export interface AuthenticatedRequest extends Request {
   user: User;
@@ -30,13 +31,22 @@ export class SessionGuard implements CanActivate {
     const response = context.switchToHttp().getResponse<Response>();
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('Referrer-Policy', 'no-referrer');
+    // Explicit bearer credentials take precedence and are verified before any CSRF exemption.
+    if (request.headers.authorization !== undefined) {
+      const bearer = readBearerToken(request.headers.authorization);
+      if (!bearer) throw authenticationFailed();
+      const session = await this.sessions.authenticate(bearer);
+      request.user = session.user;
+      request.sessionId = session.id;
+      return true;
+    }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
       if (
         request.headers['x-csrf-protection'] !== '1' ||
         !this.config.allowedOrigins.includes(request.headers.origin ?? '')
       ) {
         throw new ForbiddenException({
-          code: 'FORBIDDEN',
+          code: 'CSRF_INVALID',
           message: 'Origine ou protection CSRF invalide.',
         });
       }

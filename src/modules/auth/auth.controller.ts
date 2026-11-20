@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiHeader,
   ApiCookieAuth,
   ApiNoContentResponse,
@@ -22,7 +23,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { AuthConfig } from './auth.config';
 import { AuthService } from './auth.service';
 import { AuthThrottleGuard } from './auth-throttle.guard';
-import { readCookie } from './crypto.util';
+import { readBearerToken, readCookie } from './crypto.util';
 import { SessionsService } from './sessions.service';
 import { ApiErrorDto } from '../../common/dto/api-error.dto';
 
@@ -124,12 +125,18 @@ export class AuthController {
 
   @Post('logout')
   @ApiCookieAuth('sessionCookie')
+  @ApiBearerAuth('accessToken')
   @ApiHeader({
     name: 'Origin',
     required: true,
     schema: { type: 'string', format: 'uri' },
   })
-  @ApiResponse({ status: 403, type: ApiErrorDto, description: 'FORBIDDEN' })
+  @ApiResponse({ status: 403, type: ApiErrorDto, description: 'CSRF_INVALID' })
+  @ApiResponse({
+    status: 401,
+    type: ApiErrorDto,
+    description: 'UNAUTHENTICATED (Bearer invalide)',
+  })
   @HttpCode(204)
   @Header('Cache-Control', 'no-store')
   @ApiHeader({
@@ -145,7 +152,8 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ) {
     await this.sessions.revoke(
-      readCookie(request.headers.cookie, 'brume_session'),
+      readBearerToken(request.headers.authorization) ??
+        readCookie(request.headers.cookie, 'brume_session'),
     );
     // Do not confirm logout or clear the cookie if persistence failed.
     response.clearCookie('brume_session', this.cookie('/api'));

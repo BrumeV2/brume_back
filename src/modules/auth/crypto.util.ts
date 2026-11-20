@@ -17,3 +17,12 @@ export function readCookie(
   // Ambiguous cookies (e.g. injected from another path) are rejected.
   return values.length === 1 ? values[0].slice(name.length + 1) : undefined;
 }
+
+/** A malformed Authorization header must never fall back to a cookie session. */
+export function readBearerToken(
+  header: string | undefined,
+): string | undefined {
+  if (!header) return undefined;
+  const match = /^Bearer ([A-Za-z0-9_-]{43})$/i.exec(header);
+  return match && match[0].length === header.length ? match[1] : undefined;
+}

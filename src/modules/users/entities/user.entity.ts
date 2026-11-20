@@ -20,8 +20,18 @@ export class User extends BaseEntity {
     length: 255,
     unique: true,
     select: false,
+    nullable: true,
   })
-  googleSub!: string;
+  googleSub!: string | null;
+
+  @Column({
+    name: 'password_hash',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+    select: false,
+  })
+  passwordHash!: string | null;
 
   @Column({ type: 'varchar', length: 254, unique: true })
   email!: string;
@@ -43,8 +53,8 @@ export class User extends BaseEntity {
   })
   status!: AccountStatus;
 
-  @Column({ name: 'email_verifie_at', type: 'timestamptz' })
-  emailVerifiedAt!: Date;
+  @Column({ name: 'email_verifie_at', type: 'timestamptz', nullable: true })
+  emailVerifiedAt!: Date | null;
 
   @OneToOne('Profile', 'user')
   profile?: Profile;

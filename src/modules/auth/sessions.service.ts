@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, MoreThan, Repository } from 'typeorm';
+import { EntityManager, IsNull, MoreThan, Repository } from 'typeorm';
 import { AccountStatus, User } from '../users/entities/user.entity';
 import { authenticationFailed } from '../users/users.service';
 import { AuthConfig } from './auth.config';
@@ -9,14 +9,15 @@ import { Session } from './entities/session.entity';
 
 @Injectable()
 export class SessionsService {
+  private readonly logger = new Logger(SessionsService.name);
   constructor(
     @InjectRepository(Session) private readonly sessions: Repository<Session>,
     private readonly config: AuthConfig,
   ) {}
 
-  async create(user: User) {
+  async create(user: User, manager?: EntityManager) {
     const token = randomToken();
-    await this.sessions.insert({
+    await (manager?.getRepository(Session) ?? this.sessions).insert({
       userId: user.id,
       tokenHash: hashToken(token),
       expiresAt: new Date(Date.now() + this.config.sessionTtl * 1000),
@@ -45,5 +46,6 @@ export class SessionsService {
       { tokenHash: hashToken(token), revokedAt: IsNull() },
       { revokedAt: new Date() },
     );
+    this.logger.log(JSON.stringify({ event: 'AUTH_LOGOUT_SUCCEEDED' }));
   }
 }

@@ -22,7 +22,7 @@ export class AuthThrottleGuard implements CanActivate {
   async canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<Request>();
     const key = hashToken(
-      `google:${request.ip ?? request.socket.remoteAddress ?? 'unknown'}`,
+      `auth:${request.ip ?? request.socket.remoteAddress ?? 'unknown'}`,
     );
     // No process-local map: this limit also works with multiple API instances.
     const rows: { attempts: number; retry_after: number }[] =
